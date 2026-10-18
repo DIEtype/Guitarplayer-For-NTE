@@ -1,14 +1,22 @@
 # Guitarplayer For NTE · 异环吉他编曲器
 
-Windows 桌面吉他编谱与自动演奏工具。当前发布版本 **v0.11.0**，提供独立 EXE，无需安装 Python。
+Windows 桌面吉他编谱与自动演奏工具。当前发布版本 **v0.11.1**，提供独立 EXE，无需安装 Python。
 
 ## 下载
 
-[下载 v0.11.0 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.11.0/NTE-Guitar-Player-v0.11.0-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
+[下载 v0.11.1 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.11.1/NTE-Guitar-Player-v0.11.1-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
 
 完整解压到可写的文件夹，双击 **NTEGuitarPlayer.exe**。正常演奏会申请管理员权限，以匹配游戏权限；离线编谱可带 `--no-admin` 启动。程序与窗口使用明音凛头像图标，图标来源和制作说明随包提供。
 
 升级时保留原目录的 `library/`、`settings/` 和需要留存的 `logs/`；关闭旧窗口后再替换 EXE。发布包不包含个人曲库、校准配置或演奏日志。
+
+## v0.11.1 更新
+
+- **按住时值**：和弦、品格及混合模式的数字键拨弦，以及鼠标左右扫弦，按谱面时值保持；支持 BPM 变化和跨小节延音。
+- **起音保持准拍**：数字键的松开独立于翻页、选择和模式切换；同一按键再次起音前留出短暂松开间隔。
+- **扫弦切换提示**：鼠标选择前提前松开正在保持的扫弦，避免拖动；主界面提示缩短位置和时间。
+- **默认开启，可切回短按**：“拨弦与扫弦按谱面时值保持”随曲谱保存；“最短按键毫秒”保障输入识别。
+- **新增示例**：`examples/按住时值_拨弦与扫弦对比.gscore`，从和弦模式第一页开始，对比长短音、双弦、扫弦、切模式与跨小节延音。
 
 ## v0.11.0 更新
 
@@ -36,7 +44,7 @@ Windows 桌面吉他编谱与自动演奏工具。当前发布版本 **v0.11.0**
 - MIDI 可选择非鼓轨声部与整轨移调，保留速度变化；可选择单音旋律或指弹近似。
 - 曲谱、MIDI 和 WAV 试听文件保存在程序旁的本地曲库。
 
-和弦转译可选参考指法或本机实测音高表，本地合成试听是参考音色。游戏中的实际延音由采样决定；快速翻页和模式切换仍需准备间隔。跨小节延音目前按整列处理，独立声部重叠延音与 Guitar Pro 文件导入尚未完整支持。
+和弦转译可选参考指法或本机实测音高表，本地合成试听是参考音色。按住时长按谱面发送，实际尾音随游戏音色而异；快速翻页和模式切换仍需准备间隔。暂停会打断延音，继续时重新触发当前选择项可恢复的音。跨小节延音目前按整列处理，独立声部重叠延音与 Guitar Pro 文件导入尚未完整支持。
 
 ## 旧版本
 
