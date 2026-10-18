@@ -4,7 +4,7 @@ Windows 桌面吉他编谱与自动演奏工具。当前发布版本 **v0.11.0**
 
 ## 下载
 
-[下载 v0.11.0 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.11.0/NTE-Guitar-Player-v0.11.0-Windows.zip) · [SHA256](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.11.0/NTE-Guitar-Player-v0.11.0-Windows.zip.sha256) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
+[下载 v0.11.0 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.11.0/NTE-Guitar-Player-v0.11.0-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
 
 完整解压到可写的文件夹，双击 **NTEGuitarPlayer.exe**。正常演奏会申请管理员权限，以匹配游戏权限；离线编谱可带 `--no-admin` 启动。程序与窗口使用明音凛头像图标，图标来源和制作说明随包提供。
 
