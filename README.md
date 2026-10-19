@@ -1,14 +1,24 @@
 # Guitarplayer For NTE · 异环吉他编曲器
 
-Windows 桌面吉他编谱与自动演奏工具。当前发布版本 **v0.11.1**，提供独立 EXE，无需安装 Python。
+Windows 桌面吉他编谱与自动演奏工具。当前发布版本 **v0.11.2**，提供独立 EXE，无需安装 Python。
 
 ## 下载
 
-[下载 v0.11.1 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.11.1/NTE-Guitar-Player-v0.11.1-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
+[下载 v0.11.2 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.11.2/NTE-Guitar-Player-v0.11.2-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
 
 完整解压到可写的文件夹，双击 **NTEGuitarPlayer.exe**。正常演奏会申请管理员权限，以匹配游戏权限；离线编谱可带 `--no-admin` 启动。程序与窗口使用明音凛头像图标，图标来源和制作说明随包提供。
 
 升级时保留原目录的 `library/`、`settings/` 和需要留存的 `logs/`；关闭旧窗口后再替换 EXE。发布包不包含个人曲库、校准配置或演奏日志。
+
+## v0.11.2 更新
+
+- **主旋律与声部分类**：MIDI 保留通道、力度和原始结束时间作为线索，支持指定旋律通道、逐音修正角色；“声部与去留”展示分类依据及实际输出。
+- **失真段伴奏简化**：默认“旋律＋稀疏低音”，保留低音节拍骨架，优先简化内声部；也可保留全部或仅主旋律。清音段、明确扫弦和待核对音默认保留。
+- **装饰音适配**：先尝试原样起音，再提前安排；必要时合并或省略并记录。移调评分纳入这部分丢音，主动伴奏简化单独报告。
+- **长曲操作优化**：后台转译提供进度与取消；只绘制可见小节，播放时间线只移动游标，并缓存变速时间索引。
+- **独立输入调度**：不同数字键可在上一弦保持时触发，并提前准备下一次选择；同键重触发、翻页及 Z／V 切换仍保留必要间隔。
+
+在“指弹转译”中选择伴奏策略，并在“声部与去留”核对分类、修正和试听后应用。旧曲库、设置及原谱保留。自动分类属于规则推断，复杂声部可手动指定；快速输入的接受情况仍以游戏表现为准。
 
 ## v0.11.1 更新
 
