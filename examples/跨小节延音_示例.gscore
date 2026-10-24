@@ -1,0 +1,44 @@
+{
+  "version": 4,
+  "kind": "fingerstyle_source",
+  "bpm": 100.0,
+  "meter": [
+    4,
+    4
+  ],
+  "bars": 2,
+  "tempo_map": [],
+  "source_bpm": 100.0,
+  "bar_changes": [],
+  "default_timbre": "clean",
+  "capo": 0,
+  "chord_marks": [],
+  "cells": [
+    {
+      "start": "3",
+      "beats": "3",
+      "values": [
+        3,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "sweep": 0
+    },
+    {
+      "start": "6",
+      "beats": "1",
+      "values": [
+        5,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "sweep": 0
+    }
+  ]
+}

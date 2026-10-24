@@ -1,0 +1,11 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.gscore text eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.mid binary
+*.wav binary
+*.zip binary

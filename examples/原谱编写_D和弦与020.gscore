@@ -1,0 +1,147 @@
+{
+  "version": 4,
+  "kind": "fingerstyle_source",
+  "bpm": 100.0,
+  "meter": [
+    4,
+    4
+  ],
+  "bars": 2,
+  "tempo_map": [],
+  "source_bpm": 100.0,
+  "bar_changes": [],
+  "default_timbre": "clean",
+  "capo": 0,
+  "chord_marks": [
+    [
+      "0",
+      "D"
+    ],
+    [
+      "4",
+      "C"
+    ]
+  ],
+  "cells": [
+    {
+      "start": "0",
+      "beats": "1",
+      "values": [
+        "x",
+        "dot",
+        "x",
+        "x",
+        null,
+        null
+      ]
+    },
+    {
+      "start": "1",
+      "beats": "1/2",
+      "values": [
+        0,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "start": "3/2",
+      "beats": "1/2",
+      "values": [
+        2,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "start": "2",
+      "beats": "1/2",
+      "values": [
+        0,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "start": "5/2",
+      "beats": "1/2",
+      "values": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "start": "3",
+      "beats": "1",
+      "values": [
+        "x",
+        "x",
+        "x",
+        "x",
+        null,
+        null
+      ]
+    },
+    {
+      "start": "4",
+      "beats": "1",
+      "values": [
+        0,
+        "x",
+        "x",
+        "dot",
+        "x",
+        null
+      ]
+    },
+    {
+      "start": "5",
+      "beats": "1/2",
+      "values": [
+        0,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "start": "11/2",
+      "beats": "1/2",
+      "values": [
+        null,
+        0,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "start": "6",
+      "beats": "2",
+      "values": [
+        "x",
+        "dot",
+        "x",
+        "x",
+        "x",
+        null
+      ]
+    }
+  ]
+}

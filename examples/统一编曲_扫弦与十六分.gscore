@@ -1,0 +1,170 @@
+{
+  "version": 4,
+  "kind": "fingerstyle_source",
+  "bpm": 100.0,
+  "meter": [
+    4,
+    4
+  ],
+  "bars": 2,
+  "tempo_map": [],
+  "source_bpm": 100.0,
+  "bar_changes": [],
+  "default_timbre": "clean",
+  "capo": 0,
+  "chord_marks": [
+    [
+      "0",
+      "D"
+    ],
+    [
+      "4",
+      "C"
+    ]
+  ],
+  "cells": [
+    {
+      "start": "0",
+      "beats": "1",
+      "values": [
+        "x",
+        "x",
+        "x",
+        "x",
+        "x",
+        "x"
+      ],
+      "sweep": 102
+    },
+    {
+      "start": "1",
+      "beats": "1/2",
+      "values": [
+        "x",
+        "x",
+        "x",
+        "x",
+        "x",
+        "x"
+      ],
+      "sweep": 101
+    },
+    {
+      "start": "3/2",
+      "beats": "1/4",
+      "values": [
+        0,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "sweep": 0
+    },
+    {
+      "start": "7/4",
+      "beats": "1/4",
+      "values": [
+        2,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "sweep": 0
+    },
+    {
+      "start": "2",
+      "beats": "1/4",
+      "values": [
+        0,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "sweep": 0
+    },
+    {
+      "start": "9/4",
+      "beats": "3/4",
+      "values": [
+        "x",
+        "x",
+        "x",
+        "x",
+        "x",
+        "x"
+      ],
+      "sweep": 102
+    },
+    {
+      "start": "3",
+      "beats": "1",
+      "values": [
+        "x",
+        "x",
+        "x",
+        "x",
+        "x",
+        "x"
+      ],
+      "sweep": 101
+    },
+    {
+      "start": "4",
+      "beats": "1",
+      "values": [
+        "x",
+        "x",
+        "x",
+        "x",
+        "x",
+        "x"
+      ],
+      "sweep": 102
+    },
+    {
+      "start": "5",
+      "beats": "1",
+      "values": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "sweep": 0
+    },
+    {
+      "start": "6",
+      "beats": "1",
+      "values": [
+        5,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "sweep": 0
+    },
+    {
+      "start": "7",
+      "beats": "1",
+      "values": [
+        "x",
+        "x",
+        "x",
+        "x",
+        "x",
+        "x"
+      ],
+      "sweep": 101
+    }
+  ]
+}
