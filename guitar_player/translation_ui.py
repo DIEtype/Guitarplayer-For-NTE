@@ -497,10 +497,25 @@ class TranslationWindow(tk.Toplevel):
         if editor is not None and editor.winfo_exists():
             self.feedback.set('请先应用并关闭现有图形编谱窗口，再载入转译结果');return
         if self.parent.dirty and not messagebox.askyesno('应用为新曲谱','主窗口有未保存内容。确认用转译结果替换编辑内容？原文件不会改写。',parent=self):return
-        notice='初次转译 '+self.source.name+'：'+self.report['summary']+'。编辑后以当前谱为准。'
-        self.parent.accept_visual_score(self.result,self.report['summary'],chord_mode='mixed',origin_notice=notice,source_document=self.source.document)
-        self.parent.file_path=None
-        self.parent.open_visual_editor();self.destroy()
+        applied=False
+        try:
+            notice='初次转译 '+self.source.name+'：'+self.report['summary']+'。编辑后以当前谱为准。'
+            self.parent.accept_visual_score(self.result,self.report['summary'],chord_mode='mixed',origin_notice=notice,source_document=self.source.document)
+            applied=True;self.parent.file_path=None
+            self.parent.open_visual_editor()
+            editor=self.parent.tab_editor
+            if editor is None or not editor.winfo_exists():
+                raise ValueError(self.parent.status.get() or '未能创建编曲窗口')
+        except Exception as error:
+            reason=str(error).strip() or type(error).__name__
+            if applied:
+                message='演奏谱已载入主窗口，但编曲窗口打开失败：'+reason+'。转译预览已保留；可关闭本窗口后点主界面“手动编谱”重试。原始文件未改写。'
+            else:
+                message='应用转译结果失败：'+reason+'。转译预览已保留，主窗口未完成换谱；可先保存转换报告，核对原因后重试。原始文件未改写。'
+            self.feedback.set(message);self.parent.status.set(message)
+            messagebox.showerror('无法应用转译结果',message,parent=self)
+            return
+        self.destroy()
 
     def save_report(self):
         report=self.report

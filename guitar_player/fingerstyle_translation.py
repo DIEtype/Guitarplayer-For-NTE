@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 from .game_profile import GameProfile,ROMAN,CHORD_PAGE_INDEX
-from .guitar import GuitarScore,GuitarEvent,parse_guitar,apply_capo,make_plan,UP,DOWN,event_position
+from .guitar import GuitarScore,GuitarEvent,parse_guitar,apply_capo,make_plan,UP,DOWN,event_position,split_long_rests
 from .music import fret_pitch,positions_for_pitch,pitch_range_hint
 from .measures import timbre_points
 from .score import pitch_name
@@ -69,6 +69,8 @@ def from_midi(source,track_index):
         end=min(max(n.end for n in notes),attacks[i+1][0] if i+1<len(attacks) else max(n.end for n in notes))
         if not F(1,960)<=end-at<=128:raise ValueError('MIDI 时值超出 1/960～128 拍，请先分段')
         events.append(GuitarEvent(tuple(sorted({n.pitch for n in notes})),at,end-at,'Zero','MIDI',1));cursor=end
+    if cursor>100000:raise ValueError('MIDI 超过 100000 拍，请先分段')
+    events=split_long_rests(events)
     marks=[];at_bar=F(0);bar_index=0;meter=source.signatures[0][1]
     if not valid_meter(meter):raise ValueError('MIDI 起始拍号超出支持范围')
     for at,next_meter in source.signatures[1:]:

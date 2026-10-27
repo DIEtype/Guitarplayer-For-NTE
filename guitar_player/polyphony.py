@@ -4,7 +4,7 @@ from dataclasses import replace
 from fractions import Fraction as F
 from math import ceil
 
-from .guitar import GuitarEvent,make_plan
+from .guitar import GuitarEvent,make_plan,split_long_rests
 from .game_profile import GameProfile,ROMAN
 from .music import positions_for_pitch,fret_pitch
 from .midi_import import convert_melody,_page
@@ -76,7 +76,7 @@ def convert_fingerstyle(source,track_index,transpose=0,initial_page=0,timing=Non
         name=ROMAN[fret-1] if fret else 'Zero'
         if at>cursor:events.append(GuitarEvent((),cursor,at-cursor,name,'休止',1))
         events.append(GuitarEvent(strings,at,end-at,name,'+'.join(map(str,strings)),1));cursor=end
-    result=replace(base,events=tuple(events),beats=max(base.beats,cursor))
+    result=replace(base,events=split_long_rests(events),beats=max(base.beats,cursor))
     profile=GameProfile.frets();profile.initial_page=initial_page
     warning=''
     try:make_plan(result,profile,timing=timing,tap=tap)

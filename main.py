@@ -51,6 +51,19 @@ def launch():
             if not app.usage_tour.seen or app.usage_tour.active:raise RuntimeError('操作引导未正确记录完成状态')
             from guitar_player.guitar import parse_guitar,UP
             from guitar_player.game_profile import GameProfile
+            from dataclasses import replace
+            from fractions import Fraction
+            from guitar_player.chord_score import score_to_commands
+            from guitar_player.midi_import import score_to_tab
+            from guitar_player.tab import parse_tab
+            gap_source=parse_guitar('{G} 0:1 1:1')
+            long_gap=replace(gap_source,events=(replace(gap_source.events[0],beats=Fraction(198)),
+                replace(gap_source.events[1],start=Fraction(198))),beats=Fraction(199))
+            restored=parse_guitar(score_to_commands(long_gap),long_gap.bpm)
+            fret_gap=replace(long_gap,events=tuple(replace(e,chord='Zero') for e in long_gap.events))
+            tab_gap=parse_tab(score_to_tab(fret_gap),fret_gap.bpm)
+            if restored.events[-1].start!=198 or tab_gap.events[-1].start!=198 or restored.beats!=199:
+                raise RuntimeError('长休止导出改变了后续起拍')
             wheel_score=parse_guitar('{G} 1 {XII} ↑ {Zero} 2')
             app._begin_playback_display(wheel_score,GameProfile.mixed())
             app._display_note(0,(1,))

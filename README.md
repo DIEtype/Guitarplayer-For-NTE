@@ -1,10 +1,10 @@
 # Guitarplayer For NTE · 异环吉他编曲器
 
-Windows 桌面吉他编谱与自动演奏工具，by Akari。当前版本 **v0.12.11**，提供独立 EXE，无需安装 Python。
+Windows 桌面吉他编谱与自动演奏工具，by Akari。当前版本 **v0.12.12**，提供独立 EXE，无需安装 Python。
 
 ## 下载与教程
 
-[下载 v0.12.11 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.12.11/NTE-Guitar-Player-v0.12.11-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
+[下载 v0.12.12 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.12.12/NTE-Guitar-Player-v0.12.12-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
 
 [视频教程 · Bilibili](https://www.bilibili.com/video/BV1UMnL6yEkV/) · [百度网盘备用入口](https://pan.baidu.com/s/1Zk7ZYHZxvSpX1IQWtjLZGw?pwd=9w2e)，提取码 **9w2e**。网盘内文件版本以实际提供的文件为准。
 
@@ -12,7 +12,13 @@ Windows 桌面吉他编谱与自动演奏工具，by Akari。当前版本 **v0.1
 
 升级前关闭旧窗口，保留原目录的 `library/` 和 `settings/`，再替换程序。曲库、校准、个人节奏预设与引导状态保存在本机，不随发布包提供。
 
-## 这次更新
+## v0.12.12 修复
+
+- 修复 MIDI 含大段空白时，转译预览正常，但确认“应用为演奏谱，再打开编曲”后没有换谱、没有打开编曲窗口的问题。
+- 超过 128 拍的休止自动分段，空白总长、后续音符起拍及变速位置保持不变；覆盖混合转译、单音旋律和品格指弹近似，指令谱与 TAB 导出同步处理。
+- 应用结果或打开编曲窗口失败时显示具体原因，保留转译预览供核对和重试；不会再只留下不可见的回调异常。
+
+## v0.12.11 更新
 
 - **首次使用引导**：第一次启动，卡片逐步介绍曲谱来源、手动编谱、本地试听、游戏窗口、校准和自动演奏，并高亮对应按钮。完成、跳过或关闭后，后续启动不再自动弹出；右上角“使用引导”可重新查看。日常操作没有悬浮提示。
 - **主界面重新分组**：蓝色“导入 MIDI／我的曲库”、青色“手动编谱”和粉色“5 秒后自动演奏”区分常用操作。较少使用的选项集中到“曲谱工具”和“游戏设置”，小窗口会自动换行。

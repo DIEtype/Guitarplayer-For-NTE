@@ -33,6 +33,25 @@ class GuitarEvent:
     source_spans: tuple = ()
 
 
+def split_long_rests(events):
+    """Keep silence exact while respecting the text formats' event limits.
+
+    Sounding notes are left intact: splitting one would retrigger its attack.
+    """
+    result=[];minimum=Fraction(1,960);maximum=Fraction(128)
+    for event in events:
+        if event.notes or event.beats<=maximum:
+            result.append(event);continue
+        if event.start+event.beats>100000:raise GuitarError('曲谱超过 100000 拍，请先分段')
+        cursor=event.start;end=event.start+event.beats
+        while cursor<end:
+            remaining=end-cursor;length=min(maximum,remaining)
+            # Do not create an invalid tiny remainder from a valid long gap.
+            if 0<remaining-length<minimum:length=remaining-minimum
+            result.append(replace(event,start=cursor,beats=length));cursor+=length
+    return tuple(result)
+
+
 @dataclass(frozen=True)
 class GuitarScore:
     events: tuple[GuitarEvent, ...]

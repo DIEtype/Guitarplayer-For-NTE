@@ -10,7 +10,7 @@ if str(vendor) not in sys.path:sys.path.insert(0,str(vendor))
 import mido
 
 from .game_profile import ROMAN
-from .guitar import GuitarEvent,GuitarScore
+from .guitar import GuitarEvent,GuitarScore,split_long_rests
 from .music import positions_for_pitch,pitch_range_hint
 from .score import pitch_name
 from .arrangement import find_fingerings,PitchNote
@@ -118,9 +118,10 @@ def convert_melody(source,track_index,transpose=0,highest=True,initial_page=0,ti
         if note.end>next_at:overlaps+=1
         events.append(GuitarEvent((string,),note.start,end-note.start,chord,pitch_name(note.pitch+transpose),1))
         cursor=end
+    if cursor>100000:raise ValueError("曲谱超过 100000 拍，请先分段")
+    events=split_long_rests(events)
     if any(not Fraction(1,960)<=event.beats<=128 for event in events):
         raise ValueError("文件含超出 1/960～128 拍的音符或休止，请先分段或量化；不会默默改变节奏")
-    if cursor>100000:raise ValueError("曲谱超过 100000 拍，请先分段")
     marks=[];at_bar=Fraction(0);bar_index=0;meter=source.signatures[0][1];skipped=0
     if not valid_meter(meter):raise ValueError('起始拍号超出编辑器支持范围')
     for at,next_meter in source.signatures[1:]:
@@ -136,9 +137,9 @@ def convert_melody(source,track_index,transpose=0,highest=True,initial_page=0,ti
 
 
 def score_to_tab(score):
-    blocks=[]
-    for offset in range(0,len(score.events),8):
-        chunk=score.events[offset:offset+8]
+    blocks=[];events=split_long_rests(score.events)
+    for offset in range(0,len(events),8):
+        chunk=events[offset:offset+8]
         rows=[[] for _ in range(6)];rhythms=[]
         for event in chunk:
             if any(note not in range(1,7) for note in event.notes):raise ValueError("六线谱导出只支持弦号 1～6")

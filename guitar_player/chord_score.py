@@ -3,7 +3,7 @@ from dataclasses import dataclass,replace
 from fractions import Fraction as F
 
 from .game_profile import CHORD_NAMES,ROMAN
-from .guitar import GuitarEvent,GuitarScore,UP,DOWN
+from .guitar import GuitarEvent,GuitarScore,UP,DOWN,split_long_rests
 from .tablature import TabDocument
 from .measures import apply_changes,score_layout
 
@@ -174,7 +174,7 @@ class MixedDocument(ChordDocument):
 def score_to_commands(score,mixed=False):
     """Keep chord names on rests too, so changes survive text round trips."""
     tokens=[];previous=None
-    for event in score.events:
+    for event in split_long_rests(score.events):
         if event.chord not in (CHORD_NAMES+ROMAN+('Zero',) if mixed else CHORD_NAMES):raise ValueError('曲谱包含游戏预设以外的和弦')
         if event.chord!=previous:tokens.append('{'+event.chord+'}');previous=event.chord
         notes=event.notes

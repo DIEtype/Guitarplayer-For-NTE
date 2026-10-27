@@ -473,12 +473,12 @@ class App(tk.Tk):
     def accept_visual_score(self,score,summary="",chord_mode=False,origin_notice='',source_document=None):
         from .midi_import import score_to_tab
         if self.busy:raise ValueError("请先停止播放，再应用曲谱")
-        self.unarranged_document=None;self.unarranged_reason='';self.editor.configure(state='normal')
         if chord_mode:
             from .chord_score import score_to_commands
             text=score_to_commands(score,mixed=chord_mode=='mixed');parse_guitar(text,score.bpm)
         else:
             text=score_to_tab(score);parse_tab(text,score.bpm,capo=score.capo)
+        self.unarranged_document=None;self.unarranged_reason='';self.editor.configure(state='normal')
         self.origin_notice=origin_notice
         if origin_notice:text='// 转译依据：'+origin_notice+'\n'+text
         self.mode.set('混合模式' if chord_mode=='mixed' else '和弦模式' if chord_mode else '品格模式');self.active_mode=self.mode.get()
