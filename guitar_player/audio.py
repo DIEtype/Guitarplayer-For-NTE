@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import uuid
 import wave
+from collections import Counter
 
 from .game_profile import ROMAN
 from .guitar import UP, DOWN
@@ -14,15 +15,19 @@ from .measures import timbre_points
 RATE = 22050
 
 
-def render_wav(score, path, cancel=None,*,pitch_events=False,strums=None):
+def render_wav(score, path, cancel=None,*,pitch_events=False,strums=None,event_timbres=None):
     if score.seconds > 600:
         raise ValueError("本地试听限 10 分钟，请分段试听；游戏演奏没有此限制")
     frames = int((score.seconds + .15) * RATE)
     samples = array("f", [0.0]) * frames
+    onset_voices=Counter()
+    if pitch_events:
+        for event in score.events:onset_voices[event.start,event.label]+=len(event.notes)
     tones=timbre_points(score);tone_index=0
     for event in score.events:
         while tone_index+1<len(tones) and tones[tone_index+1][0]<=event.start:tone_index+=1
         distorted=tones[tone_index][1]=='distorted'
+        if event_timbres is not None:distorted=event_timbres.get((event.start,event.label),tones[tone_index][1])=='distorted'
         if cancel and cancel.is_set():
             raise Cancelled()
         if not pitch_events and event.chord != "Zero" and event.chord not in ROMAN:
@@ -30,7 +35,8 @@ def render_wav(score, path, cancel=None,*,pitch_events=False,strums=None):
         fret = 0 if pitch_events or event.chord == "Zero" else ROMAN.index(event.chord)+1
         voices = []
         ordered=event.notes
-        direction=(strums or {}).get(event.start)
+        markers=strums or {}
+        direction=markers.get((event.start,event.label),markers.get(event.start))
         if pitch_events and direction==DOWN:ordered=tuple(reversed(ordered))
         for index,note in enumerate(ordered):
             if not pitch_events and note in (UP, DOWN):
@@ -44,7 +50,8 @@ def render_wav(score, path, cancel=None,*,pitch_events=False,strums=None):
             duration=score.seconds_at(event.start+event.beats)-score.seconds_at(event.start)
             length=min(frames-start,round(min(10,max(.10,duration*.98))*RATE))
             decay=4.5 if duration<=.75 else max(.8,min(4.5,3/duration))
-            amplitude = 6500 / math.sqrt(max(1,len(voices)))
+            count=onset_voices[event.start,event.label] if pitch_events else len(voices)
+            amplitude = 6500 / math.sqrt(max(1,count))
             phase_step = 2*math.pi*frequency/RATE
             for index in range(max(0,length)):
                 if index % 4096 == 0 and cancel and cancel.is_set():
@@ -55,7 +62,9 @@ def render_wav(score, path, cancel=None,*,pitch_events=False,strums=None):
                 wave_value=math.sin(phase)+.28*math.sin(2*phase)+.10*math.sin(3*phase)
                 value=(.8*math.tanh(3.2*(wave_value+.15*math.sin(5*phase))) if distorted else wave_value)*envelope
                 samples[start+index] += value*amplitude
-    pcm = array("h", (max(-32767,min(32767,round(value))) for value in samples))
+    peak=max(max(samples,default=0),-min(samples,default=0))
+    gain=32000/peak if peak>32767 else 1
+    pcm = array("h", (max(-32767,min(32767,round(value*gain))) for value in samples))
     with wave.open(str(path), "wb") as stream:
         stream.setnchannels(1)
         stream.setsampwidth(2)
@@ -65,7 +74,7 @@ def render_wav(score, path, cancel=None,*,pitch_events=False,strums=None):
 
 
 class SoundPreviewBackend(PreviewBackend):
-    def __init__(self, score, cache, cancel=None, sound=None,*,pitch_events=False,strums=None):
+    def __init__(self, score, cache, cancel=None, sound=None,*,pitch_events=False,strums=None,event_timbres=None):
         if sound is None:
             import winsound
             sound = winsound
@@ -76,7 +85,7 @@ class SoundPreviewBackend(PreviewBackend):
         self.paths = [self.source]
         self.started, self.playing, self.closed = False, False, False
         try:
-            render_wav(score, self.source, cancel,pitch_events=pitch_events,strums=strums)
+            render_wav(score, self.source, cancel,pitch_events=pitch_events,strums=strums,event_timbres=event_timbres)
         except Exception:
             self.source.unlink(missing_ok=True)
             raise

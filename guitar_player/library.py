@@ -71,14 +71,17 @@ class MusicLibrary:
 def read_score(path,*,_pitch_output=False):
     """Read a score for offline preview without changing the main editor."""
     path=Path(path);raw=path.read_text(encoding='utf-8-sig')
-    if path.suffix.lower()=='.gscore' and isinstance(data:=json.loads(raw),dict) and data.get('kind')=='fingerstyle_source':
+    data=json.loads(raw) if path.suffix.lower()=='.gscore' else None
+    if isinstance(data,dict) and data.get('kind')=='duet_part':
+        from .duet_project import DuetPart
+        part=DuetPart.from_dict(data.get('part'));return part.score,part.score_data()['text']
+    if isinstance(data,dict) and data.get('kind')=='fingerstyle_source':
         raise ValueError('这是指弹原谱；请点“载入编谱”进入原谱编写，再试听或转译')
     if path.suffix.lower()!='.gscore':
         is_tab=any(re.match(r'\s*[A-Ga-g1-6]\s*\|',line) for line in raw.splitlines())
         return (parse_tab(raw,_pitch_output=_pitch_output) if is_tab else parse_guitar(raw)),raw
     from .midi_import import scale_tempos
     from .game_profile import GameProfile
-    data=json.loads(raw)
     if not isinstance(data,dict) or data.get('version') not in (1,2,3) or not isinstance(data.get('text'),str):raise ValueError('曲谱格式或版本无效')
     profile=GameProfile.from_dict(data['profile'])
     text=data['text'];bpm=float(data['bpm']);notation=data.get('notation','commands')

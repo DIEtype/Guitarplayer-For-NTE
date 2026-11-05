@@ -179,7 +179,7 @@ def transpose_source(source,semitones):
                    note_hints=hints,protected_marks=protected)
 
 
-def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octaves=False,beam=48,*,transpose=0,cancel=None,sustain_notes=False,ornaments=False,progress=None,analyze_voices=False,accompaniment='all',distorted_only=True,melody_channel=None,voice_overrides=(),avoid_bm_second=True,filter_low_bass=False,high_main_octave=False,_analysis_cache=None):
+def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octaves=False,beam=48,*,transpose=0,cancel=None,sustain_notes=False,ornaments=False,progress=None,analyze_voices=False,accompaniment='all',distorted_only=True,melody_channel=None,voice_overrides=(),avoid_bm_second=False,filter_low_bass=False,high_main_octave=False,_analysis_cache=None):
     if high_main_octave:raise ValueError('已取消主旋律局部降八度；仅支持整曲统一移调，无法容纳时保留失败诊断')
     from .timing import selector_timing
     profile=copy.deepcopy(profile or GameProfile.mixed())
@@ -405,7 +405,7 @@ class KeySearchError(ValueError):
                          '每个方案的失败原因见“移调比较”。')
 
 
-def translate_best_key(source,rows,profile=None,timing=None,tap=.045,reference=True,octaves=False,beam=48,*,shifts=range(0,-25,-1),progress=None,cancel=None,sustain_notes=False,ornaments=False,analyze_voices=False,accompaniment='all',distorted_only=True,melody_channel=None,voice_overrides=(),avoid_bm_second=True,filter_low_bass=False,high_main_octave=False):
+def translate_best_key(source,rows,profile=None,timing=None,tap=.045,reference=True,octaves=False,beam=48,*,shifts=range(0,-25,-1),progress=None,cancel=None,sustain_notes=False,ornaments=False,analyze_voices=False,accompaniment='all',distorted_only=True,melody_channel=None,voice_overrides=(),avoid_bm_second=False,filter_low_bass=False,high_main_octave=False):
     """Compare whole-piece transpositions; never retune individual melody notes."""
     if high_main_octave:raise ValueError('已取消主旋律局部降八度；仅支持整曲统一移调，无法容纳时保留失败诊断')
     shifts=tuple(dict.fromkeys(shifts))

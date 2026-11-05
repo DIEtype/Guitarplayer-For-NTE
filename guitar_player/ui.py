@@ -150,6 +150,12 @@ class App(tk.Tk):
         self.welcome=None
         self.usage_tour=None
         self.guide_window=None;self.game_settings_window=None
+        self.recording_sync_window=None
+        from .recording_sync import read_settings
+        self.recording_sync_settings,self.recording_sync_notice=read_settings(self.settings_dir)
+        from .duet_project import read_project
+        self.duet_project,self.duet_project_notice=read_project(self.settings_dir)
+        self.active_duet_capture=None;self.duet_display=False
         self.preparing_audio = False
         self.audio_cancel = threading.Event()
         self._build()
@@ -179,18 +185,29 @@ class App(tk.Tk):
         if self.usage_tour is not None:return self.usage_tour.start()
 
     def open_guide(self,topic='start'):
+        from .navigation import navigate,active_page
+        owner=active_page(self)
         if self.guide_window is not None and self.guide_window.winfo_exists():
-            self.guide_window.select(topic);self.guide_window.deiconify();self.guide_window.lift();return self.guide_window
+            self.guide_window.select(topic);return navigate(owner,self.guide_window,hide_owner=True)
         from .usage_guide import UsageGuide
-        self.guide_window=UsageGuide(self,topic);return self.guide_window
+        self.guide_window=UsageGuide(self,topic);return navigate(owner,self.guide_window,hide_owner=True)
 
     def open_game_settings(self,section='timing'):
+        from .navigation import navigate,active_page
+        owner=active_page(self)
         if self.game_settings_window is not None and self.game_settings_window.winfo_exists():
-            self.game_settings_window.select(section);self.game_settings_window.deiconify();self.game_settings_window.lift()
-            return self.game_settings_window
+            self.game_settings_window.select(section);return navigate(owner,self.game_settings_window,hide_owner=True)
         if self.busy:self.status.set('请先停止播放，再修改游戏设置。');return None
         from .game_settings import GameSettings
-        self.game_settings_window=GameSettings(self);self.game_settings_window.select(section);return self.game_settings_window
+        self.game_settings_window=GameSettings(self);self.game_settings_window.select(section);return navigate(owner,self.game_settings_window,hide_owner=True)
+
+    def open_recording_sync(self):
+        from .navigation import navigate
+        if self.recording_sync_window is not None and self.recording_sync_window.winfo_exists():
+            return navigate(self,self.recording_sync_window)
+        if self.busy:self.status.set('请先停止当前播放，再设置录音合奏。');return None
+        from .recording_sync_ui import RecordingSyncDialog
+        self.recording_sync_window=RecordingSyncDialog(self);return navigate(self,self.recording_sync_window)
 
     @property
     def profile(self):
@@ -303,7 +320,8 @@ class App(tk.Tk):
 
     def open_strum_settings(self):
         dialog=tk.Toplevel(self);dialog.title('输入方式 · 圆盘、拨弦与扫弦')
-        dialog.geometry('820x700');dialog.transient(self)
+        from .navigation import active_page
+        dialog.geometry('820x700');dialog.transient(active_page(self))
         tests=ttk.Frame(dialog,padding=16);tests.pack(side='bottom',fill='x')
         for i,(label,kind) in enumerate((('测试上下扫弦','sweep'),('延音中换和弦','sweep_select'),
                                         ('测试手柄 1～6 弦','strings'),('长扫弦时值对照','long_sweep'),
@@ -398,7 +416,8 @@ class App(tk.Tk):
         dialog=tk.Toplevel(self)
         dialog.title("游戏输入连接测试")
         dialog.geometry("850x610")
-        dialog.transient(self)
+        from .navigation import active_page
+        dialog.transient(active_page(self))
         ttk.Label(dialog,text="先验证游戏有没有收到输入，再测试曲谱",font=("Microsoft YaHei UI",14,"bold"),padding=16).pack(anchor="w")
         ttk.Label(dialog,text=self.control_hint("主窗口先选中游戏窗口。每项会倒计时 3 秒，请切回游戏吉他界面。\n单键测试不使用鼠标坐标，也不切换模式或翻页；可用 F9 停止，切出游戏也会停止。"),wraplength=630,padding=(16,0,16,16)).pack(anchor="w")
         for kind,label,description in (
@@ -523,19 +542,22 @@ class App(tk.Tk):
         return self.score if changed else adapted
 
     def open_library(self):
+        from .navigation import navigate
         if self.library_window is not None and self.library_window.winfo_exists():
-            self.library_window.deiconify();self.library_window.lift();return
+            return navigate(self,self.library_window)
         try:
             from .library_ui import LibraryWindow
             self.library_window=LibraryWindow(self)
+            return navigate(self,self.library_window)
         except OSError as error:self.status.set('无法打开曲库：'+str(error))
 
     def open_visual_editor(self):
         if self.busy:return
         if self.tab_editor is not None and self.tab_editor.winfo_exists():
-            self.tab_editor.deiconify();self.tab_editor.lift();return
+            from .navigation import present
+            return present(self.tab_editor,self.tab_editor.canvas)
         if self.unarranged_document is not None:
-            self.open_fingerstyle_editor(self.unarranged_document);return
+            return self.open_fingerstyle_editor(self.unarranged_document)
         score=self.analyze()
         if score is None:return
         try:
@@ -545,20 +567,23 @@ class App(tk.Tk):
             elif self.source_game_score==score and self.arrangement_source is not None:
                 document=self.arrangement_source
             else:document=FingerstyleDocument.from_score(score)
-            self.open_fingerstyle_editor(document,game_score=score)
+            return self.open_fingerstyle_editor(document,game_score=score)
         except ValueError as error:self.status.set(str(error))
 
     def open_translator(self):
         if self.busy:return
+        from .navigation import navigate
         window=getattr(self,'translation_window',None)
-        if window is not None and window.winfo_exists():window.deiconify();window.lift();return
+        if window is not None and window.winfo_exists():
+            return navigate(self,window)
         from .translation_ui import TranslationWindow
-        self.translation_window=TranslationWindow(self)
+        self.translation_window=TranslationWindow(self);return navigate(self,self.translation_window)
 
     def open_fingerstyle_editor(self,document=None,path=None,game_score=None):
         if self.busy:return
         if self.tab_editor is not None and self.tab_editor.winfo_exists():
-            self.tab_editor.deiconify();self.tab_editor.lift()
+            from .navigation import present
+            present(self.tab_editor,self.tab_editor.canvas)
             self.tab_editor.feedback.set('请先关闭当前编谱窗口，再进入原谱编写');return
         try:
             from .fingerstyle_document import FingerstyleDocument,read_document
@@ -569,8 +594,10 @@ class App(tk.Tk):
                 if document is None and draft and draft.exists():document=read_document(draft)
             else:self.fingerstyle_game_score=game_score
             self.fingerstyle_opened_state=document.snapshot() if document is not None and game_score is not None else None
-            VisualFingerstyleEditor(self,document or FingerstyleDocument(),self.accept_fingerstyle_source,path,
+            editor=VisualFingerstyleEditor(self,document or FingerstyleDocument(),self.accept_fingerstyle_source,path,
                                     on_direct=self.accept_direct_document)
+            from .navigation import navigate
+            return navigate(self,editor,editor.canvas)
         except (OSError,ValueError) as error:self.status.set('原谱打开失败：'+str(error))
 
     def accept_direct_document(self,document):
@@ -613,9 +640,19 @@ class App(tk.Tk):
     def accept_fingerstyle_source(self,source):
         self.open_translator()
         self.translation_window.set_source(source)
+        return self.translation_window
+
+    def editor_allows_replacement(self):
+        editor=self.tab_editor
+        if editor is None or not editor.winfo_exists():return True
+        message='请先保存并关闭当前编谱窗口，再导入或打开另一份曲谱；当前编辑内容已保留。'
+        self.status.set(message);editor.feedback.set(message)
+        from .navigation import present
+        present(editor,editor.canvas);return False
 
     def import_midi(self,path=None):
         if self.busy:return
+        if not self.editor_allows_replacement():return
         path=path or filedialog.askopenfilename(parent=self,title="导入 MIDI",filetypes=[("MIDI 文件","*.mid *.midi")])
         if not path:return
         if self.dirty and not messagebox.askyesno("导入 MIDI","当前有未保存的修改，仍要导入新曲谱吗？",parent=self):return
@@ -629,7 +666,8 @@ class App(tk.Tk):
         dialog=tk.Toplevel(self)
         dialog.title("MIDI 导入 · 选择旋律轨道")
         dialog.geometry("800x650");dialog.minsize(760,600)
-        dialog.transient(self)
+        from .navigation import active_page
+        dialog.transient(active_page(self))
         ttk.Label(dialog,text=Path(path).name,font=("Microsoft YaHei UI",14,"bold"),padding=12).pack(anchor="w")
         tree=ttk.Treeview(dialog,columns=("notes","range"),show="tree headings",height=6)
         tree.heading("#0",text="轨道")
@@ -705,7 +743,8 @@ class App(tk.Tk):
                     self.accept_fingerstyle_source(original_source)
                     self.translation_window.transpose.set(AUTO_RANGE if auto_range.get() else '保持原调' if shift==0 else f'{"降" if shift<0 else "升"}{abs(shift)}半音')
                     self.translation_window.filter_low_bass.set(filter_low_bass.get())
-                    dialog.destroy();self.translation_window.convert();return
+                    from .navigation import suppress_return
+                    suppress_return(dialog);dialog.destroy();self.translation_window.convert();return
                 imported_source=source;cleanup_notice=''
                 if near_onsets.get():
                     from .onset_cleanup import cleanup_midi,cleanup_summary
@@ -722,8 +761,10 @@ class App(tk.Tk):
                 self.accept_visual_score(score,report)
                 if method.get().startswith('指弹'):
                     self.editor.insert('1.0','// '+report+'\n');self.editor.edit_modified(False)
-                dialog.destroy()
-                self.open_visual_editor()
+                editor=self.open_visual_editor()
+                if editor is None:raise ValueError('曲谱已载入，但编谱窗口未打开；请关闭已有编谱窗口后重试')
+                from .navigation import suppress_return
+                suppress_return(dialog);dialog.destroy()
             except Exception as error:
                 from .import_guidance import midi_error
                 feedback.set(midi_error(error));feedback_view.configure(foreground='#a62d43',background='#fff0f2')
@@ -731,7 +772,8 @@ class App(tk.Tk):
         dialog.auto_range=auto_range;dialog.filter_low_bass=filter_low_bass;dialog.method=method;dialog.transpose=transpose
         dialog.track_tree=tree;dialog.feedback=feedback;dialog.accept=accept;dialog.method_changed=method_changed
         dialog.feedback_view=feedback_view
-        return dialog
+        from .navigation import navigate
+        return navigate(self,dialog)
 
     def insert(self, text):
         if self.unarranged_document is not None:
@@ -753,6 +795,7 @@ class App(tk.Tk):
     def load_demo(self):
         if self.busy:
             return
+        if not self.editor_allows_replacement():return
         text = self.editor.get("1.0", "end-1c")
         if self.dirty and text not in (DEFAULT_TEXT, FRET_EXAMPLE, DEFAULT_TAB, DEMO_TAB) and not messagebox.askyesno("载入试弹曲", "当前有未保存的修改，仍要替换为试弹曲吗？", parent=self):
             return
@@ -864,6 +907,7 @@ class App(tk.Tk):
         self.pending_parse = None
         if self.busy:
             return self.score
+        self.duet_display=False
         if self.unarranged_document is not None:return self.analyze_unarranged()
         try:
             text = self.editor.get("1.0", "end-1c")
@@ -956,26 +1000,43 @@ class App(tk.Tk):
         self.player.stop()
         self.input_probe.stop()
 
-    def start(self, real, audible=False):
+    def start(self, real, audible=False, recording_sync=None,recording_capture=None,duet_part=None):
         if self.busy:
             return
-        if self.unarranged_document is not None:
+        editor=self.tab_editor
+        if editor is not None and (editor.player.running or editor.preparing):
+            self.status.set('请先停止编谱窗口的试听，再开始主界面试听或游戏演奏。');return
+        if self.unarranged_document is not None and duet_part is None:
             if real:self.status.set('当前未开始演奏：'+self.unarranged_reason+'。请打开上方“手动编谱”修改，或在编谱窗口右下角选“近似转译…”生成演奏谱。原谱可继续试听和保存。')
             else:
                 self.open_visual_editor()
                 if self.tab_editor is not None:self.tab_editor.preview(True)
             return
-        if audible and self.arrangement_source is not None and self.source_game_score==self.score:
+        if duet_part is None and audible and self.arrangement_source is not None and self.source_game_score==self.score:
             self.open_visual_editor()
             if self.tab_editor is not None:self.tab_editor.preview(True)
             return
-        score = self.analyze()
+        score = duet_part.score if duet_part is not None else self.analyze()
         if score is None:
             self.status.set(self.info.get())
             return
         try:
+            if recording_sync is not None and recording_capture is not None:
+                raise ValueError('请先自动录制伴奏，再导入录音合奏，不能同时执行两种操作')
             self.playing_real=real
-            profile = copy.deepcopy(self.profile)
+            self.active_duet_capture=None
+            if duet_part is None:
+                profile=copy.deepcopy(self.profile)
+            else:
+                from .duet_project import MODE_NAMES
+                self._apply_strum_input()
+                profile=copy.deepcopy(self.profiles[MODE_NAMES[duet_part.mode]])
+                profile.initial_mode='chord' if self.game_mode.get()=='和弦' else 'fret'
+                profile.initial_timbre=next(key for key,label in TONE_NAMES.items() if label==self.game_timbre.get())
+                page=int(self.page.get())-1;limit=4 if profile.initial_mode=='chord' else 5
+                if not 0<=page<limit:raise ValueError('请按游戏实际状态填写当前页码：和弦 1～4 页，品格 1～5 页')
+                if profile.mode=='mixed':profile.initial_pages[profile.initial_mode]=page
+                elif profile.mode==profile.initial_mode:profile.initial_page=page
             if audible:
                 if profile.mode != "fret":
                     raise ValueError("和弦音高尚未核对；请在“游戏设置 → 时间线预演”查看动作节奏，或在游戏中试听")
@@ -997,13 +1058,20 @@ class App(tk.Tk):
                 hwnd = self.window_items.get(self.window.get())
                 if not hwnd:
                     raise ValueError("先在“游戏窗口”下拉框中选择游戏窗口；没有时点“刷新”")
-                if self.input_timing.key=='adaptive' and profile.mode=='fret':
+                if duet_part is None and self.input_timing.key=='adaptive' and profile.mode=='fret':
                     score=self.adapt_fingering(score)
                     if score is None:return
-                make_plan(score,profile,tap=int(self.tap.get())/1000,timing=self.input_timing,sustain_notes=self.sustain_notes.get())
+                plan=make_plan(score,profile,tap=int(self.tap.get())/1000,timing=self.input_timing,sustain_notes=self.sustain_notes.get())
+                if recording_sync is not None:
+                    recording_sync.validate_plan(plan)
+                    # Tk owns the clipboard on its UI thread; verify it again
+                    # immediately before pasting in the selected game window.
+                    self.clipboard_clear();self.clipboard_append(recording_sync.code.strip());self.update_idletasks()
+                if recording_capture is not None:recording_capture.validate_capture_plan(plan)
                 trace=InputTrace(app_root()/"logs","auto_play",buffered=True)
                 trace.record("score",events=len(score.events),seconds=score.seconds,bpm=score.bpm,input_speed=self.input_timing.key)
                 trace.record('note_duration',sustain_notes=self.sustain_notes.get())
+                if duet_part is not None:trace.record('duet_part',role='recorded' if recording_capture is not None else 'live',name=duet_part.name)
                 trace.record('timing_config',**self.input_timing.__dict__,learned_margin=self.learn_logs.get() and self.log_estimate.ready)
                 if self.input_timing.key=='adaptive' and profile.mode=='fret':trace.record('adaptation',summary=getattr(self,'adaptive_report','保留当前指法'))
                 self.last_input_trace=trace.path
@@ -1012,9 +1080,12 @@ class App(tk.Tk):
             else:
                 backend = PreviewBackend()
             self._begin_playback_display(score,profile)
+            self.duet_display=duet_part is not None
+            self.active_duet_capture=duet_part if recording_capture is not None else None
             self.elapsed = 0
             self.editor.configure(state="disabled")
-            self.player.start(score, profile, backend, countdown=5 if real else 0, tap=int(self.tap.get()) / 1000,timing=self.input_timing,sustain_notes=self.sustain_notes.get())
+            options={key:value for key,value in (('recording_sync',recording_sync),('recording_capture',recording_capture)) if value is not None}
+            self.player.start(score, profile, backend, countdown=5 if real else 0, tap=int(self.tap.get()) / 1000,timing=self.input_timing,sustain_notes=self.sustain_notes.get(),**options)
         except Exception as error:
             if self.current_input_trace and not self.player.running:
                 self.current_input_trace.close();self.current_input_trace=None
@@ -1022,8 +1093,9 @@ class App(tk.Tk):
             self.status.set(str(error))
 
     def _poll(self):
+        wheel_dirty=False;timeline_dirty=False
         try:
-            while True:
+            for _ in range(200):
                 kind, data = self.messages.get_nowait()
                 if kind=='gamepad_status':
                     self.gamepad_status.set(data)
@@ -1076,6 +1148,15 @@ class App(tk.Tk):
                 elif kind in ("state", "done", "error"):
                     self.status.set(self.control_hint(data) if kind=='state' else data)
                     if kind in ("done", "error"):
+                        if self.active_duet_capture is not None:
+                            self.duet_project.finish_take(kind=='done' and getattr(self.player,'capture_completed',False))
+                            try:
+                                from .duet_project import write_project
+                                write_project(self.settings_dir,self.duet_project)
+                            except OSError as error:self.status.set(data+'；合奏项目保存失败：'+str(error))
+                            self.active_duet_capture=None
+                            if self.recording_sync_window is not None and self.recording_sync_window.winfo_exists():
+                                self.recording_sync_window.refresh_project()
                         if self.current_input_trace:
                             self.current_input_trace.record("playback_result",result=kind,message=data)
                             self.current_input_trace.close()
@@ -1084,24 +1165,24 @@ class App(tk.Tk):
                         self.editor.configure(state="normal")
                         self.current_notes = ()
                         self.current_actions=();self.prepared_chord=None;self.prepared_page=None
-                        self.draw_wheel()
+                        wheel_dirty=True
                 elif kind == "target":
                     self.target.set("目标：" + data)
                 elif kind == "chord":
                     self.prepared_chord = data
-                    self.draw_wheel()
+                    wheel_dirty=True
                 elif kind=='timbre':
                     if self.playing_real:self.game_timbre.set(TONE_NAMES[data])
                 elif kind=='mode':
                     if self.playing_real:self.game_mode.set('和弦' if data=='chord' else '品格')
                 elif kind == "page":
                     self.prepared_page = data
-                    self.draw_wheel()
+                    wheel_dirty=True
                 elif kind == "note":
                     index, notes = data
                     event=self._display_note(index,notes)
                     self.editor.tag_remove("playing", "1.0", "end")
-                    if event is not None:
+                    if event is not None and not self.duet_display:
                         line = event.line
                         if event.source_spans:
                             for row, column, length in event.source_spans:
@@ -1109,13 +1190,15 @@ class App(tk.Tk):
                         else:
                             self.editor.tag_add("playing", f"{line}.0", f"{line}.end")
                         self.editor.see(f"{line}.0")
-                    self.draw_wheel()
+                    wheel_dirty=True
                 elif kind == "progress":
                     self.elapsed = data
-                    self.draw_timeline()
+                    timeline_dirty=True
         except queue.Empty:
             pass
-        self.after(40, self._poll)
+        if wheel_dirty:self.draw_wheel()
+        if timeline_dirty:self.draw_timeline()
+        self.after(1 if not self.messages.empty() else 40, self._poll)
 
     def _begin_playback_display(self,score,profile):
         # Keep the exact compiled/adapted score used by the player. Preparation
@@ -1138,6 +1221,12 @@ class App(tk.Tk):
             # Mode changes recall an independent page without emitting a page
             # key event. Derive the displayed page from the sounding selector.
             self.current_page=profile.pages.get(event.chord,self.current_page)
+            if event.notes and self.duet_display and self.playing_real:
+                mode='fret' if event.chord in (*ROMAN,'Zero') else 'chord'
+                label='品格模式' if mode=='fret' else '和弦模式'
+                self.profiles[label].initial_page=self.current_page
+                self.profiles['混合模式'].initial_pages[mode]=self.current_page
+                self.page.set(str(self.current_page+1))
         self.prepared_chord=None;self.prepared_page=None
         return event
 
@@ -1203,18 +1292,19 @@ class App(tk.Tk):
 
     def draw_timeline(self):
         canvas = self.timeline
-        if not self.score:
+        score=self.playback_score if self.duet_display else self.score
+        if not score:
             canvas.delete('all');self._timeline_score=None
             return
         width = max(20, canvas.winfo_width()-4)
-        if getattr(self,'_timeline_score',None) is not self.score or getattr(self,'_timeline_width',None)!=width:
-            canvas.delete('all');self._timeline_score=self.score;self._timeline_width=width
-            self._timeline_seconds=self.score.seconds
+        if getattr(self,'_timeline_score',None) is not score or getattr(self,'_timeline_width',None)!=width:
+            canvas.delete('all');self._timeline_score=score;self._timeline_width=width
+            self._timeline_seconds=score.seconds
             total=max(.01,self._timeline_seconds)
-            for event in self.score.events:
-                start=self.score.seconds_at(event.start)
+            for event in score.events:
+                start=score.seconds_at(event.start)
                 x=2+start/total*width
-                w=(self.score.seconds_at(event.start+event.beats)-start)/total*width
+                w=(score.seconds_at(event.start+event.beats)-start)/total*width
                 canvas.create_rectangle(x,10,x+max(.5,w-1),43,fill='#f2cddd' if event.notes else LINE,outline='')
                 if w>23:canvas.create_text(x+w/2,26,text=event.label,fill=INK,font=('Consolas',9))
             canvas.create_line(0,6,0,48,fill=ACCENT,width=2,tags='timeline_playhead')
@@ -1263,18 +1353,30 @@ class App(tk.Tk):
     def open_score(self,path=None):
         if self.busy:
             return
+        if not self.editor_allows_replacement():return
         path = path or filedialog.askopenfilename(parent=self, filetypes=[("曲谱", "*.gscore *.txt"), ("所有文件", "*.*")])
         if not path:
             return
         try:
             raw = Path(path).read_text(encoding="utf-8-sig")
             source_document=None
-            if Path(path).suffix.lower()=='.gscore' and isinstance(data:=json.loads(raw),dict) and data.get('kind')=='fingerstyle_source':
+            data=json.loads(raw) if Path(path).suffix.lower()=='.gscore' else None
+            if isinstance(data,dict) and data.get('kind') in ('duet_composition','duet_session'):
+                workspace=self.open_recording_sync()
+                if workspace is not None:return workspace.open_composition(path)
+                return
+            if isinstance(data,dict) and data.get('kind')=='duet_part':
+                role=data.get('role')
+                if role not in ('recorded','live'):raise ValueError('请在“录音合奏”中选择该独立延音谱的声部用途')
+                workspace=self.open_recording_sync()
+                if workspace is not None:
+                    workspace.choose_part(role,path);return workspace
+                return
+            if isinstance(data,dict) and data.get('kind')=='fingerstyle_source':
                 from .fingerstyle_document import FingerstyleDocument
-                self.open_fingerstyle_editor(FingerstyleDocument.from_dict(data),path);return
+                return self.open_fingerstyle_editor(FingerstyleDocument.from_dict(data),path)
             if self.dirty and not messagebox.askyesno("打开曲谱", "当前有未保存的修改，仍要打开另一份曲谱吗？", parent=self):return
             if Path(path).suffix.lower() == ".gscore":
-                data = json.loads(raw)
                 if not isinstance(data, dict) or data.get("version") not in (1,2,3) or not isinstance(data.get("text"), str):
                     raise ValueError("曲谱格式或版本无效")
                 profile = GameProfile.from_dict(data["profile"])
@@ -1355,6 +1457,7 @@ class App(tk.Tk):
             self.source_game_score=self.score if source_document is not None else None
             self.fingerstyle_game_score=None
             self.dirty = False
+            return self
         except (ValueError, OSError, KeyError, TypeError, ZeroDivisionError) as error:
             self.status.set("打开失败：" + str(error))
 
@@ -1364,7 +1467,8 @@ class App(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("游戏布局与坐标校准")
         dialog.geometry(f'760x{min(710,self.winfo_screenheight()-90)}')
-        dialog.transient(self)
+        from .navigation import active_page
+        dialog.transient(active_page(self))
         editing_mode = self.mode.get()
         working = copy.deepcopy(self.profile)
         ttk.Label(dialog, text="自动校准：3 秒内切回游戏完整吉他界面，识别六根粉色琴弦。\n识别后核对下方示意图；也可导入仅含游戏客户区的 PNG，或手动拾取。", padding=14).pack(anchor="w")
@@ -1498,6 +1602,7 @@ class App(tk.Tk):
         if self.dirty and not messagebox.askyesno("关闭", "有未保存的曲谱修改，仍要关闭吗？", parent=self):
             return
         self.stop()
+        self._closing=True
         self.status.set("正在释放输入…")
         def finish():
             if self.busy:
@@ -1511,7 +1616,9 @@ class App(tk.Tk):
             if self.welcome is not None:self.welcome.close()
             if self.current_input_trace:self.current_input_trace.close();self.current_input_trace=None
             for timer in self.tk.call("after", "info"):
-                self.after_cancel(timer)
+                # Each child owns its registered callback. Cancel the timer
+                # here; widget destruction removes its own Tcl command.
+                self.tk.call('after','cancel',timer)
             self.destroy()
         finish()
 

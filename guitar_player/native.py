@@ -3,6 +3,7 @@ import ctypes as C
 from ctypes import wintypes as W
 import os
 import threading
+import time
 
 from .profile import KEY_CODES, MODIFIERS, parse_keys
 
@@ -101,6 +102,27 @@ def pick_relative_point(hwnd):
     if not left <= point.x < left + width or not top <= point.y < top + height:
         raise RuntimeError("鼠标需要放在游戏画面内")
     return ((point.x - left) / max(1, width - 1), (point.y - top) / max(1, height - 1)), (width, height)
+
+
+def clipboard_text():
+    """Read Unicode text only, for verifying the intended recording-code paste."""
+    api = user32();kernel = C.WinDLL('kernel32', use_last_error=True)
+    api.OpenClipboard.argtypes = [W.HWND];api.OpenClipboard.restype = W.BOOL
+    api.GetClipboardData.argtypes = [W.UINT];api.GetClipboardData.restype = W.HANDLE
+    kernel.GlobalLock.argtypes = [W.HANDLE];kernel.GlobalLock.restype = C.c_void_p
+    kernel.GlobalUnlock.argtypes = [W.HANDLE]
+    kernel.GlobalSize.argtypes = [W.HANDLE];kernel.GlobalSize.restype = C.c_size_t
+    if not api.OpenClipboard(None):raise RuntimeError('剪贴板正被占用，请重新开始录音合奏')
+    try:
+        handle = api.GetClipboardData(13)
+        if not handle:return ''
+        size = kernel.GlobalSize(handle)
+        if not 2 <= size <= 16384:return ''
+        pointer = kernel.GlobalLock(handle)
+        if not pointer:raise RuntimeError('无法读取录音码，请重新开始录音合奏')
+        try:return C.string_at(pointer, size).decode('utf-16-le').split('\0', 1)[0]
+        finally:kernel.GlobalUnlock(handle)
+    finally:api.CloseClipboard()
 
 
 def activate_window(hwnd):
@@ -267,14 +289,16 @@ class WindowsBackend:
             return
         array = (INPUT * len(entries))(*entries)
         C.set_last_error(0)
+        dispatch_clock=time.perf_counter()
         count = self.api.SendInput(len(entries), array, C.sizeof(INPUT))
         error=C.get_last_error()
-        self._log("send_input",requested=len(entries),accepted=int(count),win_error=error,
+        self._log("send_input",requested=len(entries),accepted=int(count),win_error=error,dispatch_clock=dispatch_clock,
                   inputs=[{"type":int(entry.type),"scan":int(entry.ki.wScan),"flags":int(entry.ki.dwFlags)}
                           if entry.type==1 else {"type":int(entry.type),"x":int(entry.mi.dx),"y":int(entry.mi.dy),"flags":int(entry.mi.dwFlags)}
                           for entry in entries])
         if count != len(entries):
             raise RuntimeError(f"Windows 只接受了 {count}/{len(entries)} 个输入事件；请检查游戏与程序的权限及输入兼容性")
+        return dispatch_clock
 
     def _log(self,event,**fields):
         trace=getattr(self,"trace",None)
@@ -299,6 +323,33 @@ class WindowsBackend:
         return INPUT(type=0, mi=MOUSEINPUT(round((x - vx) * 65535 / max(1, vw - 1)),
                                           round((y - vy) * 65535 / max(1, vh - 1)),
                                           0, 0x8000 | 0x4000 | 0x0001, 0, 0))
+
+    def check_recording_layout(self, reference_size):
+        self.check_target()
+        if tuple(client_rect(self.api, self.hwnd)[2:]) != tuple(reference_size):
+            raise RuntimeError('游戏客户区尺寸与录音按钮校准时不同，请重新拾取本次录制或合奏所需的位置')
+
+    def check_recording_code(self, expected):
+        self.check_target()
+        if clipboard_text() != expected:
+            raise RuntimeError('剪贴板内容已变化，已取消粘贴与导入；请重新开始录音合奏，倒计时内不要复制其他内容')
+
+    def recording_move(self, point):
+        self.check_target()
+        left, top, width, height = self.target_rect or client_rect(self.api, self.hwnd)
+        if not self.api.SetCursorPos(left + round(point[0] * (width-1)), top + round(point[1] * (height-1))):
+            raise RuntimeError('无法定位录音按钮，请核对游戏与程序权限后重新校准')
+        self._send([self._move(point)])
+
+    def recording_down(self):
+        self.check_target();self.held_buttons.add('left');return self._send([self._button('left')])
+
+    def recording_up(self):
+        self.chord_up_mouse()
+
+    def chord_up_mouse(self):
+        if 'left' in self.held_buttons:
+            self._send([self._button('left', True)]);self.held_buttons.discard('left')
 
     def chord_move(self,chord):
         self.check_target()
@@ -336,11 +387,10 @@ class WindowsBackend:
         self._log('gamepad_selector',slot=slot,selector=selector)
 
     def chord_up(self):
-        if self.profile.selector_input=='gamepad':
+        if getattr(getattr(self,'profile',None),'selector_input','mouse')=='gamepad':
             if self.gamepad is not None:self.gamepad.release_selector()
             return
-        if 'left' in self.held_buttons:
-            self._send([self._button('left',True)]);self.held_buttons.discard('left')
+        self.chord_up_mouse()
 
     def key_down(self,key):
         self.check_target()

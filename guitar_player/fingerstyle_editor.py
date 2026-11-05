@@ -38,6 +38,13 @@ class VisualFingerstyleEditor(VisualTabEditor):
         from .composer_workspace import build_workspace
         build_workspace(self)
 
+    def open_duet_workspace(self):
+        if not self.settings_changed():return
+        try:self.keep_draft();document=copy.deepcopy(self.doc)
+        except OSError as error:self.feedback.set('草稿未保存：'+str(error));return
+        self.destroy();workspace=self.parent.open_recording_sync()
+        return workspace.open_duet_editor('live',document=document)
+
     def draw(self,width=None):
         super().draw(width)
         from .composer_workspace import update_context
@@ -79,7 +86,7 @@ class VisualFingerstyleEditor(VisualTabEditor):
         info=tk.StringVar();ttk.Label(dialog,textvariable=info,foreground='#a62d43',wraplength=430,padding=(14,0,14,12)).pack(anchor='w')
         def close():
             dialog.destroy()
-            if self.winfo_viewable():self.grab_set();self.canvas.focus_set()
+            if self.winfo_viewable():self.canvas.focus_set()
         def apply():
             if self.write_sequence():close()
             else:info.set('未写入：'+self.feedback.get())
@@ -267,7 +274,8 @@ class VisualFingerstyleEditor(VisualTabEditor):
         for at,name in changes:
             x=first+float(at-measure.start)/float(measure.beats)*span
             self.canvas.create_text(x,top+35,text=name,anchor='w',fill=FOCUS,font=('Consolas',12,'bold'),tags='source_chord')
-        for cell in self.doc.cells:
+        cells=self.draw_cells.between(measure.start,measure.end) if hasattr(self,'draw_cells') else self.doc.cells
+        for cell in cells:
             if not cell.sweep or not measure.start<=cell.start<measure.end:continue
             x=first+float(cell.start-measure.start)/float(measure.beats)*span
             y1,y2=(top+55,top+165) if cell.sweep==UP else (top+165,top+55)
@@ -323,7 +331,8 @@ class VisualFingerstyleEditor(VisualTabEditor):
         try:
             if not self.settings_changed():return False
             self.keep_draft();self.on_direct(copy.deepcopy(self.doc));self.applied_state=self.doc.snapshot()
-            if close:self.destroy()
+            if close:
+                self._navigation_owner=self.parent;self.destroy()
             else:self.feedback.set('原谱已直接载入；近似转译仍可单独选择')
             return True
         except (ValueError,OSError) as error:self.feedback.set(file_guidance(error,'载入'));return False
@@ -334,8 +343,12 @@ class VisualFingerstyleEditor(VisualTabEditor):
             if not self.settings_changed():return False
             source=self.resolved_source();self.keep_draft();self.applied_state=self.doc.snapshot()
             callback=self.on_apply
-            # Release this editor before a converted game score can be opened.
-            self.destroy();callback(source);return True
+            # Keep the editor recoverable if opening the destination fails.
+            destination=callback(source)
+            from .navigation import suppress_return,present
+            suppress_return(self);self.destroy()
+            if destination is not None and hasattr(destination,'winfo_exists') and destination.winfo_exists():present(destination)
+            return True
         except (ValueError,OSError) as error:self.feedback.set(file_guidance(error,'送入转译'));return False
 
     def save_file(self,path=None):

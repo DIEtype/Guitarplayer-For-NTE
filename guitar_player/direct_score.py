@@ -1,6 +1,7 @@
 """Map written actions literally, without arrangement, note loss or key search."""
 from bisect import bisect_right
 from dataclasses import replace
+from collections import defaultdict,deque
 
 from .composition import materialize_repeats
 from .fingerstyle_document import HIT_X,HIT_DOT
@@ -18,12 +19,13 @@ def compile_document(document,rows=None):
     Timing feasibility belongs to the planner and never blocks score loading.
     """
     doc,_=materialize_repeats(document);score=doc.score()
-    cells={cell.start:cell for cell in doc.cells};events=[];labels=[]
+    cells=defaultdict(deque);events=[];labels=[]
+    for cell in doc.cells:cells[cell.start].append(cell)
     tones=timbre_points(score);starts=[at for at,_ in tones];bar_starts=[bar.start for bar in doc.layout]
     tables={tone:available_voicings(rows or {},tone) for tone in ('clean','distorted')}
     selector='Zero'
     for event in score.events:
-        cell=cells.get(event.start)
+        cell=cells[event.start].popleft() if event.label=='原谱' and cells[event.start] else None
         if cell is None or not cell.notes:
             events.append(replace(event,chord=selector));continue
         bar=bisect_right(bar_starts,cell.start)

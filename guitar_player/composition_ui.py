@@ -27,7 +27,7 @@ def save_rhythm_dialog(editor,on_saved=None,owner=None,existing=None):
     info=tk.StringVar();ttk.Label(dialog,textvariable=info,foreground='#a62d43',wraplength=420,padding=(14,4)).pack(anchor='w')
     def close():
         dialog.destroy();target=owner or editor
-        if target.winfo_viewable():target.grab_set()
+        if target.winfo_viewable() and target is not editor:target.grab_set()
         if owner is None:editor.canvas.focus_set()
     def save():
         try:
@@ -47,7 +47,7 @@ def save_rhythm_dialog(editor,on_saved=None,owner=None,existing=None):
 
 def _finish(dialog,editor):
     dialog.destroy()
-    if editor.winfo_viewable():editor.grab_set();editor.canvas.focus_set()
+    if editor.winfo_viewable():editor.canvas.focus_set()
 
 
 def _range_fields(parent,first,last):
@@ -69,16 +69,18 @@ def pattern_dialog(editor):
     ttk.Label(heading,text='节奏预设',font=('Microsoft YaHei UI',15,'bold')).pack(side='left')
     ttk.Label(heading,text='选预设 → 核对拍号与弦位 → 应用到选中小节',foreground=MUTED).pack(side='left',padx=18)
     body=ttk.Frame(dialog,padding=(12,0));body.pack(fill='both',expand=True)
-    left=ttk.Frame(body,width=300);left.pack(side='left',fill='y')
-    search=tk.StringVar();ttk.Entry(left,textvariable=search,width=30).pack(fill='x',pady=(0,6))
-    library=ttk.Frame(left);library.pack(fill='both',expand=True)
+    body.columnconfigure(1,weight=1);body.rowconfigure(0,weight=1)
+    left=ttk.Frame(body,width=300);left.grid(row=0,column=0,sticky='nsew')
+    left.columnconfigure(0,weight=1);left.rowconfigure(1,weight=1)
+    search=tk.StringVar();ttk.Entry(left,textvariable=search,width=30).grid(row=0,column=0,sticky='ew',pady=(0,6))
+    library=ttk.Frame(left);library.grid(row=1,column=0,sticky='nsew')
     tree=ttk.Treeview(library,columns=('meter',),show='tree headings',height=10)
     tree.heading('#0',text='名称');tree.heading('meter',text='拍号');tree.column('#0',width=220);tree.column('meter',width=55,stretch=False)
     tree.pack(side='left',fill='both',expand=True)
     scroll=ttk.Scrollbar(library,orient='vertical',command=tree.yview);scroll.pack(side='left',fill='y')
     tree.configure(yscrollcommand=scroll.set)
-    manage=ttk.Frame(left);manage.pack(fill='x',pady=(6,0))
-    right=ttk.Frame(body);right.pack(side='left',fill='both',expand=True,padx=(14,0))
+    manage=ttk.Frame(left);manage.grid(row=2,column=0,sticky='ew',pady=(6,0))
+    right=ttk.Frame(body);right.grid(row=0,column=1,sticky='nsew',padx=(14,0))
     title=tk.StringVar(value='选择一个节奏预设');ttk.Label(right,textvariable=title,font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w',pady=(0,7))
     canvas=tk.Canvas(right,bg='white',height=225,highlightthickness=1,highlightbackground='#d8e0e8');canvas.pack(fill='both',expand=True)
     horizontal=ttk.Scrollbar(right,orient='horizontal',command=canvas.xview);horizontal.pack(fill='x');canvas.configure(xscrollcommand=horizontal.set)
@@ -90,7 +92,7 @@ def pattern_dialog(editor):
     ttk.Label(options,text='低音弦').pack(side='left')
     bass_box=ttk.Combobox(options,textvariable=bass,values=('自动','6','5','4','3','2','1'),state='readonly',width=5);bass_box.pack(side='left',padx=6)
     start,end,range_row=_range_fields(dialog,first,last)
-    info=tk.StringVar(value='可在谱面写好一个小节，点“保存当前小节…”存入我的预设；应用会替换选定范围，可撤销。')
+    info=tk.StringVar(value='自定义：先在谱面写好一小节，再点“存为我的预设…”；预设保存奏法和节奏，应用时可更换和弦。')
     notice=ttk.Label(dialog,textvariable=info,wraplength=780,padding=(12,2));notice.pack(anchor='w')
     library_problem=tk.StringVar();library_notice=ttk.Label(dialog,textvariable=library_problem,foreground='#a62d43',wraplength=780,padding=(12,0));library_notice.pack(anchor='w')
     def notify(message,error=False):
@@ -116,8 +118,16 @@ def pattern_dialog(editor):
         if not dialog.winfo_exists():return
         item=selected();is_user=item is not None and item.key in users
         rename_button.configure(state='normal' if is_user else 'disabled');delete_button.configure(state='normal' if is_user else 'disabled')
+        apply_button.configure(state='normal' if item is not None else 'disabled')
         canvas.delete('all')
-        if item is None:title.set('选择一个节奏预设');return
+        if item is None:
+            custom=tree.selection()==('custom',)
+            title.set('我的预设 · 保存一个小节的节奏' if custom else '选择一个具体节奏预设')
+            message=('这里还没有自定义预设。' if not users else '展开“我的预设”，选择已保存的节奏。') if custom else '请在左侧选择分组下的具体节奏。'
+            guide=message+'\n\n新建方法：\n① 回到谱面，写好一小节的拨弦、扫弦和休止。\n② 再打开本窗口，点左下角“存为我的预设…”。\n③ 命名保存后，选择目标小节和和弦，再点“应用”。'
+            canvas.create_text(20,20,text=guide,anchor='nw',width=max(260,canvas.winfo_width()-40),fill=MUTED,font=('Microsoft YaHei UI',10))
+            if update_notice:notify('分组标题不能应用；可点“存为我的预设…”保存当前小节，或选择一个具体节奏。')
+            return
         title.set(item.name)
         name=chord.get() if chord.get()!='沿用各小节' else editor.doc.chord_at(editor.doc.bar(first).start) or 'G'
         width=max(420,canvas.winfo_width(),len(item.actions)*35+80);left=32;span=width-62
@@ -153,11 +163,13 @@ def pattern_dialog(editor):
                 editor.feedback.set(f'节奏预设已填入第 {a+1}～{b+1} 小节；可逐音修改或 Ctrl+Z 撤销')
             else:notify('未应用：'+editor.feedback.get(),True)
         except ValueError as error:notify('未应用：'+str(error),True)
-    def save_current():return save_rhythm_dialog(editor,lambda item:reload(item.key),owner=dialog)
+    def saved(item):
+        search.set('');reload(item.key);notify('已存入我的预设：'+item.name+'；选择目标小节和和弦，再点“应用到选定小节”。')
+    def save_current():return save_rhythm_dialog(editor,saved,owner=dialog)
     def update_current():
         item=selected()
         if item is not None and item.key in users:
-            return save_rhythm_dialog(editor,lambda saved:reload(saved.key),owner=dialog,existing=item)
+            return save_rhythm_dialog(editor,saved,owner=dialog,existing=item)
     def rename():
         item=selected()
         if item is None or item.key not in users:return
@@ -185,10 +197,11 @@ def pattern_dialog(editor):
         if not deleted:return
         try:save_pattern(pattern_path(editor),deleted[0]);reload(deleted[0].key);deleted.clear();restore_button.configure(state='disabled')
         except (ValueError,OSError) as error:notify('恢复失败：'+str(error),True)
-    ttk.Button(manage,text='保存当前小节…',command=save_current,style='Composer.TButton').pack(side='left')
-    rename_button=ttk.Button(manage,text='改名',command=rename,style='Composer.TButton');rename_button.pack(side='left',padx=4)
-    delete_button=ttk.Button(manage,text='删除',command=remove,style='Composer.TButton');delete_button.pack(side='left')
-    restore_button=ttk.Button(left,text='撤销删除',command=restore,state='disabled',style='Composer.TButton');restore_button.pack(anchor='w',pady=(5,0))
+    save_button=ttk.Button(manage,text='存为我的预设…',command=save_current,style='Composer.Load.TButton');save_button.pack(fill='x')
+    manage_actions=ttk.Frame(left);manage_actions.grid(row=3,column=0,sticky='ew',pady=(5,0))
+    rename_button=ttk.Button(manage_actions,text='改名',command=rename,style='Composer.TButton');rename_button.pack(side='left')
+    delete_button=ttk.Button(manage_actions,text='删除',command=remove,style='Composer.TButton');delete_button.pack(side='left',padx=4)
+    restore_button=ttk.Button(manage_actions,text='撤销删除',command=restore,state='disabled',style='Composer.TButton');restore_button.pack(side='left')
     def context(event):
         key=tree.identify_row(event.y)
         if key not in users:return
@@ -213,6 +226,7 @@ def pattern_dialog(editor):
     dialog.feedback=info;dialog.library_problem=library_problem;dialog.range_start=start;dialog.range_end=end
     dialog.chord=chord;dialog.bass=bass;dialog.preview_pattern=preview
     dialog.apply_button=apply_button;dialog.notice_label=notice;dialog.library_notice=library_notice
+    dialog.save_current_button=save_button;dialog.search=search
     return dialog
 
 

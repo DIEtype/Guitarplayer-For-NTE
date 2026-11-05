@@ -103,7 +103,7 @@ class VisualTabEditor(tk.Toplevel):
 
     def initial_focus(self):
         if self.winfo_viewable() and not self.attributes('-disabled'):
-            self.grab_set();self.canvas.focus_set()
+            self.canvas.focus_set()
 
     @property
     def changed(self):return self.doc.snapshot()!=self.applied_state
@@ -354,7 +354,7 @@ class VisualTabEditor(tk.Toplevel):
         message=tk.StringVar();ttk.Label(dialog,textvariable=message,foreground='#a62d43',wraplength=510,padding=(14,0)).pack()
         def close():
             dialog.destroy()
-            if self.winfo_viewable():self.grab_set();self.canvas.focus_set()
+            if self.winfo_viewable():self.canvas.focus_set()
         def apply():
             if self.insert_beat(note_duration(dialog.denominator.get(),dot.get(),triplet.get())):close()
             else:message.set(self.feedback.get())
@@ -421,7 +421,7 @@ class VisualTabEditor(tk.Toplevel):
         label=ttk.Label(dialog,textvariable=info,wraplength=480,padding=16);label.pack(anchor='w')
         def finish():
             dialog.destroy()
-            if self.winfo_viewable():self.grab_set()
+            if self.winfo_viewable():self.canvas.focus_set()
         def apply():
             try:
                 from .measures import valid_meter
@@ -468,11 +468,13 @@ class VisualTabEditor(tk.Toplevel):
 
     def refresh(self):
         self.dot_var.set(self.dotted);self.triplet_var.set(self.triplet)
-        for value,canvas in self.music_buttons.items():
-            canvas.delete('all');canvas.configure(bg=TINT if value==self.value else PAPER,
-                                                  highlightbackground=FOCUS if value==self.value else LINE)
-            music_symbol(canvas,24,32,value)
-            canvas.create_text(27,49,text=NAMES[value],fill=INK,font=('Microsoft YaHei UI',8))
+        if getattr(self,'_palette_value',None)!=self.value:
+            for value,canvas in self.music_buttons.items():
+                canvas.delete('all');canvas.configure(bg=TINT if value==self.value else PAPER,
+                                                      highlightbackground=FOCUS if value==self.value else LINE)
+                music_symbol(canvas,24,32,value)
+                canvas.create_text(27,49,text=NAMES[value],fill=INK,font=('Microsoft YaHei UI',8))
+            self._palette_value=self.value
         self.summary.set(f'{self.doc.bars} 小节   ·   默认 {self.doc.bpm:g} BPM')
         cell=self.doc.at(self.at)
         note='休止符' if cell and cell.fret is None else f'{cell.fret} 品' if cell else '空位，输入数字即可写入'
@@ -493,13 +495,17 @@ class VisualTabEditor(tk.Toplevel):
 
     def draw(self,width=None):
         if not hasattr(self,'canvas') or self.closed:return
-        c=self.canvas;c.delete('all')
-        self.visible_bars=set()
+        from .score_view import score_view
+        c=self.canvas;view=score_view(self,self.doc)
         width=max(780,width or c.winfo_width());columns=2 if width>=960 else 1
+        key=(view.state,width,getattr(self,'bar_selection',None))
+        if getattr(self,'_render_key',None)==key:
+            self.draw_cursor();return
+        self._render_key=key;c.delete('all');self.visible_bars=set()
         measure_width=(width-40-(columns-1)*24)/columns
         self.bar_boxes=[(20+(i%columns)*(measure_width+24),20+(i//columns)*274,measure_width) for i in range(self.doc.bars)]
         height=40+math.ceil(self.doc.bars/columns)*274;c.configure(scrollregion=(0,0,width,height))
-        self.draw_score=self.doc.score();self.draw_tempos=dict(self.draw_score.tempo_map)
+        self.draw_score=view.score;self.draw_tempos=view.tempos;self.draw_cells=view
         self.draw_columns=columns
         self.draw_visible()
         self.draw_playhead()
@@ -522,6 +528,26 @@ class VisualTabEditor(tk.Toplevel):
             for item in set(self.canvas.find_all())-before:self.canvas.addtag_withtag(f'bar_{index}',item)
         self.visible_bars=wanted
         self.canvas.tag_raise('playhead')
+        if hasattr(self,'draw_cursor'):self.draw_cursor()
+
+    def draw_cursor(self):
+        if self.closed or not self.bar_boxes:return
+        index=self.doc.bar_index(self.at)
+        if index>=len(self.bar_boxes):return
+        left,top,width=self.bar_boxes[index]
+        self.draw_cursor_at(left,top,width)
+
+    def draw_cursor_at(self,left,top,width,scale=1):
+        c=self.canvas;c.delete('edit_cursor');bar=self.doc.bar(self.doc.bar_index(self.at))
+        x=left+58*scale+float(self.at-bar.start)/float(bar.beats)*(width-78*scale)
+        y=top+(55+(self.string-1)*22)*scale
+        c.create_rectangle(x-11*scale,top+39*scale,x+11*scale,top+177*scale,outline='#c5dde1',tags='edit_cursor')
+        c.create_rectangle(x-12*scale,y-12*scale,x+12*scale,y+12*scale,outline=FOCUS,width=2,tags='edit_cursor')
+        if not self.doc.at(self.at):
+            c.create_text(x,y,text='·',fill=FOCUS,font=('Consolas',max(7,round(18*scale))),tags='edit_cursor')
+            before=set(c.find_all());music_symbol(c,x,top+202*scale,self.value,color='#79aeb4',scale=.7*scale)
+            for item in set(c.find_all())-before:c.addtag_withtag('edit_cursor',item)
+        c.tag_raise('playhead')
 
     def draw_bar(self,index,left,top,width):
         measure=self.doc.bar(index);c=self.canvas;first=left+58;span=width-78;start=measure.start;end=measure.end
@@ -537,9 +563,6 @@ class VisualTabEditor(tk.Toplevel):
         if index==0 or change and change.meter is not None:marks.append(f'{measure.meter[0]}/{measure.meter[1]}')
         if index==0 or change and change.timbre is not None:marks.append(TONE_NAMES[timbre_at(self.draw_score,start)])
         if marks:c.create_text(mark_x,top+13,text='   '.join(marks),anchor='w',fill=FOCUS,font=('Microsoft YaHei UI',10,'bold'),tags='measure_mark')
-        if self.doc.bar_index(self.at)==index:
-            x=px(self.at)
-            c.create_rectangle(x-11,top+39,x+11,top+177,fill='#f0f8f9',outline='')
         for beat in range(1,math.ceil(measure.beats)):
             x=px(start+beat);c.create_line(x,top+42,x,top+174,fill='#edf2f5',dash=(2,5))
         for string,label in enumerate(('e','B','G','D','A','E'),1):
@@ -549,7 +572,8 @@ class VisualTabEditor(tk.Toplevel):
         c.create_line(left+43,top+55,left+43,top+165,fill=INK,width=1.3)
         c.create_line(left+width-8,top+55,left+width-8,top+165,fill=INK,width=1.3)
         fragments=[]
-        for cell in self.doc.cells:
+        cells=self.draw_cells.between(start,end) if hasattr(self,'draw_cells') else self.doc.cells
+        for cell in cells:
             if cell.start>=end or cell.end<=start:continue
             at=max(start,cell.start);length=min(end,cell.end)-at;x=px(at)
             continued=cell.start<start
@@ -616,7 +640,8 @@ class VisualTabEditor(tk.Toplevel):
             c.create_text(mid,y,text='3',fill=INK,font=('Consolas',10,'italic'))
         if not fragments and index not in getattr(self.doc,'measure_repeats',()):music_symbol(c,left+width/2,top+106,1,True,color='#c2cdd4')
         else:
-            for at,length in self.doc.rest_spans(index):
+            rests=self.draw_cells.rests(start,end) if hasattr(self,'draw_cells') else self.doc.rest_spans(index)
+            for at,length in rests:
                 for part in rhythm_parts(length):
                     value=identify_duration(part);den,dot,trip=display_duration(part)
                     x=px(at);music_symbol(c,x,top+107,den,True,color=MUTED)
@@ -624,12 +649,6 @@ class VisualTabEditor(tk.Toplevel):
                     if trip:c.create_text(x,top+136,text='3',fill=MUTED,font=('Consolas',9))
                     if value is None:c.create_text(x+9,top+128,text='*',fill=MUTED,font=('Consolas',9))
                     at+=part
-        if self.doc.bar_index(self.at)==index:
-            x=px(self.at);y=top+55+(self.string-1)*22
-            c.create_rectangle(x-12,y-12,x+12,y+12,outline=FOCUS,width=2)
-            if not self.doc.at(self.at):
-                c.create_text(x,y,text='·',fill=FOCUS,font=('Consolas',18))
-                music_symbol(c,x,top+202,self.value,color='#79aeb4',scale=.7)
 
     def note_text(self,cell,string):return str(cell.fret)
 
@@ -671,6 +690,7 @@ class VisualTabEditor(tk.Toplevel):
 
     def preview(self,from_start=False):
         if self.player.running or self.preparing:self.stop_preview();return
+        if self.parent.busy:self.feedback.set('请先停止主界面／曲库的试听或游戏演奏，再试听编谱。');return
         try:
             score,audio_score,audio_options,index=self.preview_segment(from_start);self.preview_score=score
             self.audio_cancel=threading.Event();cancel=self.audio_cancel;self.preparing=True
@@ -693,8 +713,9 @@ class VisualTabEditor(tk.Toplevel):
 
     def _poll(self):
         if self.closed:return
+        playhead_dirty=False;scroll_to_playhead=False
         try:
-            while True:
+            for _ in range(200):
                 kind,data=self.messages.get_nowait()
                 if kind=='audio_ready':
                     backend,score,cancel=data
@@ -704,27 +725,33 @@ class VisualTabEditor(tk.Toplevel):
                         try:
                             self.player.start(score,GameProfile.frets(),backend)
                             self.preview_button.configure(text='■ 停止试听  Space')
-                        except ValueError as error:backend.close();self.feedback.set(str(error))
+                        except ValueError as error:backend.close();self.feedback.set('试听未开始：'+str(error))
                 elif kind=='audio_error':
                     message,cancel=data
                     if cancel is self.audio_cancel:
                         self.preparing=False;self.feedback.set('试听已取消' if cancel.is_set() else '试听失败：'+message)
                         self.preview_button.configure(text='▶ 本小节试听 Space')
                 elif kind=='note' and data[0]>=0:
-                    self.play_at=self.playback_position(self.preview_score.events[data[0]].start);self.draw_playhead()
+                    self.play_at=self.playback_position(self.preview_score.events[data[0]].start);playhead_dirty=True
                 elif kind=='progress':
                     score=self.preview_score
-                    self.play_at=self.playback_position(score.beat_at_seconds(data));self.draw_playhead()
-                    index=self.doc.bar_index(self.play_at)
-                    if index<len(self.bar_boxes):
-                        top=self.bar_boxes[index][1];visible=self.canvas.canvasy(0);height=self.canvas.winfo_height()
-                        if height>100 and (top+55<visible or top+165>visible+height):
-                            total=float(self.canvas.cget('scrollregion').split()[3]);self.canvas.yview_moveto(max(0,(top-10)/total))
+                    self.play_at=self.playback_position(score.beat_at_seconds(data));playhead_dirty=True;scroll_to_playhead=True
                 elif kind in ('done','error'):
-                    self.play_at=None;self.draw_playhead();self.preview_button.configure(text='▶ 本小节试听 Space')
-                    self.feedback.set(str(data) if kind=='error' else '试听结束，可继续编辑')
+                    self.play_at=None;playhead_dirty=True;self.preview_button.configure(text='▶ 本小节试听 Space')
+                    if kind=='error':
+                        message=str(data)
+                        if message.strip("'\" ").isdigit():message='内部事件处理异常（编号 '+message.strip("'\" ")+'）；请保存曲谱并重新开始试听，若仍出现请提供对应的 .gscore。'
+                        self.feedback.set('试听失败：'+message)
+                    else:self.feedback.set('试听结束，可继续编辑')
         except queue.Empty:pass
-        self.poll_id=self.after(40,self._poll)
+        if playhead_dirty:self.draw_playhead()
+        if scroll_to_playhead and self.play_at is not None:
+            index=self.doc.bar_index(self.play_at)
+            if index<len(self.bar_boxes):
+                top=self.bar_boxes[index][1];visible=self.canvas.canvasy(0);height=self.canvas.winfo_height()
+                if height>100 and (top+55<visible or top+165>visible+height):
+                    total=float(self.canvas.cget('scrollregion').split()[3]);self.canvas.yview_moveto(max(0,(top-10)/total))
+        self.poll_id=self.after(1 if not self.messages.empty() else 40,self._poll)
 
     def close(self):
         self.stop_preview()

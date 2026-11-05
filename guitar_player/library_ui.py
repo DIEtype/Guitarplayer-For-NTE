@@ -203,9 +203,14 @@ class LibraryWindow(tk.Toplevel):
         if not self.available():return
         if not self.selected:self.feedback.set('请先选择左侧文件。');return
         if self.selected.kind=='WAV':self.feedback.set('WAV 用于试听；请选择曲谱或 MIDI 载入编谱。');return
-        if self.selected.kind=='MIDI':self.parent.import_midi(self.selected.path)
-        else:self.parent.open_score(self.selected.path)
-        self.feedback.set('已请求载入 '+self.selected.path.name+'，请查看主窗口。')
+        if self.selected.kind=='MIDI':target=self.parent.import_midi(self.selected.path)
+        else:target=self.parent.open_score(self.selected.path)
+        if target is None:
+            self.feedback.set('尚未载入；如已取消则可重新选择文件。'+self.parent.status.get());return
+        from .navigation import navigate,present
+        if target is self.parent:self.withdraw();present(self.parent)
+        else:navigate(self,target,getattr(target,'canvas',None),hide_owner=True)
+        self.feedback.set('已载入 '+self.selected.path.name+'；关闭工作页可返回曲库。')
 
     def _poll(self):
         if self.closed:return

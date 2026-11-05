@@ -167,11 +167,16 @@ class Player:
 
 
 class GuitarPlayer(Player):
-    def start(self, score, profile, backend, countdown=0, gate=0.72, tap=0.045,timing=None,sustain_notes=False):
+    def start(self, score, profile, backend, countdown=0, gate=0.72, tap=0.045,timing=None,sustain_notes=False,recording_sync=None,recording_capture=None):
         from .guitar import make_plan
         from .timing import selector_timing
         self.timing=selector_timing(timing,profile);self.live=not isinstance(backend,PreviewBackend)
         self.transaction=False;self.pause_requested=False
+        self.recording_sync=recording_sync
+        self.recording_capture=recording_capture
+        self.capture_completed=False
+        if recording_sync is not None and recording_capture is not None:
+            raise ValueError('自动录制与录音合奏不能同时启动，请先录制伴奏，再导入合奏')
         if not 0.015 <= tap <= 0.2:
             raise ValueError("按键时长应在 15～200 毫秒之间")
         if isinstance(backend,PreviewBackend):
@@ -188,9 +193,21 @@ class GuitarPlayer(Player):
             self.plan=tuple(sorted(steps,key=lambda step:step.at))
         else:
             self.plan = make_plan(score, profile, gate, tap=tap,timing=self.timing,sustain_notes=sustain_notes)
+        if recording_sync is not None:
+            if not self.live:raise ValueError('录音合奏只用于游戏演奏；本地试听不会点击游戏录音按钮')
+            recording_sync.validate_plan(self.plan)
+        if recording_capture is not None:
+            if not self.live:raise ValueError('自动录制只用于游戏演奏；本地试听不会点击游戏录音按钮')
+            recording_capture.validate_capture_plan(self.plan)
         super().start(score, profile, backend, countdown, gate)
 
     def toggle_pause(self):
+        if getattr(self,'recording_capture',None) is not None and self.running:
+            self.emit('state','自动录制时不能单独暂停演奏；请在游戏前台按 F9，程序会尝试停止录音。')
+            return
+        if getattr(self,'recording_sync',None) is not None and self.running:
+            self.emit('state','录音合奏不能单独暂停现场声部，否则会失去同步；请用 F9 停止，游戏录音需手动停止。')
+            return
         if getattr(self,'live',False) and self.running and self.transaction and not self.paused:
             self.pause_requested=not self.pause_requested
             self.emit('state','将在当前拨弦释放后暂停' if self.pause_requested else '已取消待暂停请求')
@@ -209,6 +226,15 @@ class GuitarPlayer(Player):
             elif item.kind=='release' and pending:
                 note_holds[pending[0]]=item.at-pending[1];pending=None
         independent=any(item.kind=='note_release' for item in self.plan)
+        # Independent holds can share an onset but have different release
+        # times. Dispatch their key-downs together instead of adding one native
+        # call (and a possible game frame) per duration group.
+        note_batches={};batched_done=set()
+        if independent and self.live:
+            for item in self.plan:
+                if item.kind=='note' and item.data[1]:
+                    key=(item.at,score.events[item.data[0]].chord)
+                    note_batches.setdefault(key,[]).append(item.data)
         held_notes={};minimum_release={};note_ready={};pending_taps=set();controls=set()
         playing_mode=profile.initial_mode or profile.mode
         selected_by_mode={};prepared_selector=None
@@ -218,6 +244,7 @@ class GuitarPlayer(Player):
                 note_holds[index]=item.at-score.seconds_at(score.events[index].start)
         max_late=0;note_count=0
         trace=getattr(backend,'trace',None)
+        capture_session=None
         try:
             prepare=getattr(backend,'prepare',None)
             if prepare:prepare(score)
@@ -232,10 +259,29 @@ class GuitarPlayer(Player):
             if self.cancel.is_set():
                 raise Cancelled()
             self.emit("target", backend.acquire_target())
-            self.origin = time.perf_counter() - min(0, self.plan[0].at)
-            self.emit("state", "正在演奏")
+            sync=getattr(self,'recording_sync',None)
+            capture=getattr(self,'recording_capture',None)
+            if capture is not None:
+                from .recording_sync import RecordingCapture
+                capture_session=RecordingCapture(backend,capture,self.cancel,self.emit)
+                self.origin=capture_session.start()
+                self.emit('state','正在录制伴奏 · 以开始录音点击为时间零点；演奏完成后自动停止录音。')
+            elif sync is not None:
+                from .recording_sync import launch_recording
+                self.origin=launch_recording(backend,sync,self.cancel,self.emit)
+                self.emit('state','录音合奏中 · 现场声部按录音时间轴演奏；F9 停止自动输入，录音需在游戏中停止。')
+            else:
+                self.origin = time.perf_counter() - min(0, self.plan[0].at)
+                self.emit("state", "正在演奏")
             active = ()
             for step in self.plan:
+                batch=()
+                guard_notes=step.data[1] if step.kind=='note' else ()
+                if step.kind=='note' and step.data[1] and independent:
+                    if step.data[0] in batched_done:continue
+                    candidates=note_batches.get((step.at,score.events[step.data[0]].chord),(step.data,))
+                    together=tuple(n for _index,notes in candidates for n in notes)
+                    if len(set(together))==len(together):batch=tuple(candidates);guard_notes=together
                 needs_guard=self.live and not (step.kind=='note' and not step.data[1])
                 target=max(step.at,ready.get(step.kind,-1e9)) if needs_guard else step.at
                 if independent:
@@ -243,7 +289,7 @@ class GuitarPlayer(Player):
                         index=step.data[0] if step.kind=='note_release' else step.data
                         target=max(target,minimum_release.get(index,-1e9))
                     elif step.kind=='note':
-                        target=max(target,*(note_ready.get(n,-1e9) for n in step.data[1]),-1e9)
+                        target=max(target,*(note_ready.get(n,-1e9) for n in guard_notes),-1e9)
                     def waiting_active():
                         # A paused note is physically released. Re-pressing it
                         # under a newly selected fret/chord would play a wrong
@@ -260,7 +306,8 @@ class GuitarPlayer(Player):
                 actual=self.elapsed()
                 if self.live and step.kind=='note' and step.data[1]:
                     position=note_count
-                    gap=note_times[position+1]-step.at if position+1<len(note_times) else .2
+                    next_position=position+(len(batch) if batch else 1)
+                    gap=note_times[next_position]-step.at if next_position<len(note_times) else .2
                     tolerance=min(.030,max(.008,gap*.15));late=max(0,actual-step.at)
                     if late>tolerance+1e-6:
                         from .guitar import event_position,UP,DOWN
@@ -269,7 +316,7 @@ class GuitarPlayer(Player):
                         if trace:trace.record('timing_overrun',index=step.data[0],planned=step.at,actual=actual,lateness_ms=late*1000,
                                               allowed_ms=tolerance*1000,location=location,selector=event.chord,notes=list(event.notes))
                         raise RuntimeError(f'第 {step.data[0]+1} 个事件（{location} · {event.chord} · {action}）切换／调度迟到 {late*1000:.0f} 毫秒，允许 {tolerance*1000:.0f} 毫秒，已停止以免挤拍；可试稳拍快速档，持续卡顿需检查主机负载，重新开始前对齐游戏页')
-                    max_late=max(max_late,late);note_count+=1
+                    max_late=max(max_late,late);note_count+=len(batch) if batch else 1
                 if self.live and trace:
                     event_index=step.data[0] if step.kind in ('note','note_release') else step.data if step.kind=='note_settled' else None
                     trace.record('schedule',action=step.kind,planned=step.at,actual=actual,guard_until=target,
@@ -326,27 +373,40 @@ class GuitarPlayer(Player):
                     index, notes = step.data
                     # A rest may occur while a page key is held in preparation
                     # for the next note. Keep that pending release intact.
-                    if notes:
-                        actions=tuple(profile.bindings[n] for n in notes)
+                    # Reference WAVs already contain the sound. Their events
+                    # may carry MIDI pitches (e.g. 64), not guitar strings.
+                    # Preview only advances time and UI; native bindings and
+                    # held-key bookkeeping apply to real game playback.
+                    if notes and self.live:
+                        members=batch or ((index,notes),)
+                        pressed=tuple(n for _owner,part in members for n in part)
+                        actions=tuple(profile.bindings[n] for n in pressed)
                         self.transaction=True;hold=note_holds[index]
                         if independent:
-                            if any(n in held_notes for n in notes):
+                            if any(n in held_notes for n in pressed):
                                 raise RuntimeError('同一按键尚未释放，已停止以免重复起音错乱')
-                            for n,action in zip(notes,actions):held_notes[n]=(index,action)
-                            pending_taps.add(index)
+                            for owner,part in members:
+                                for n in part:held_notes[n]=(owner,profile.bindings[n])
+                                pending_taps.add(owner)
                         else:
                             active=actions;active_kind='note'
                         backend.press(actions)
                         if independent:
-                            minimum_release[index]=self.elapsed()+hold
+                            sent=self.elapsed()
+                            for owner,_part in members:
+                                minimum_release[owner]=sent+note_holds[owner];batched_done.add(owner)
+                            if trace and len(members)>1:trace.record('note_batch',planned=step.at,events=[owner for owner,_ in members],notes=list(pressed))
                             from .timing import pointer_free
-                            if pointer_free(notes,profile):
+                            if pointer_free(pressed,profile):
                                 # Selection/page preparation can overlap a held
                                 # string, but must follow its completed key-down.
                                 for kind in ('page','mode_down','timbre_down','chord_down'):
                                     ready[kind]=max(ready.get(kind,-1e9),self.elapsed()+self.timing.key_gap)
                         else:ready['release']=self.elapsed()+hold
-                    self.emit("note", (index, notes))
+                    if batch:
+                        for owner,part in batch[:-1]:self.emit('note',(owner,part))
+                        self.emit('note',(batch[-1][0],guard_notes))
+                    else:self.emit("note", (index, notes))
                 elif step.kind=='note_settled':
                     pending_taps.discard(step.data)
                 elif step.kind=='note_release':
@@ -391,6 +451,11 @@ class GuitarPlayer(Player):
                                      duration_ms=(time.perf_counter()-operation_started)*1000)
             if self.live:
                 detail=f'输入发送完成 · {note_count} 次拨弦，最大调度迟到 {max_late*1000:.1f} ms；游戏响应需另行核对'
+            if capture_session is not None:
+                backend.release_all()
+                capture_session.finish(score.seconds)
+                self.capture_completed=True
+                detail='伴奏演奏完成，已发送停止录音；请在游戏中保存录音，复制录音码后进行合奏。'
             self.emit("progress", score.seconds)
         except Cancelled:
             detail = "已停止 · 已释放按键"
@@ -398,13 +463,22 @@ class GuitarPlayer(Player):
             outcome, detail = "error", str(error)
         finally:
             try:
-                try:backend.release_all()
+                try:
+                    backend.release_all()
+                    if capture_session is not None and capture_session.started and not capture_session.stopped:
+                        try:
+                            capture_session.finish(cleanup=True)
+                            detail+='；已发送停止录音，请在游戏中核对并保存'
+                        except Exception as error:
+                            outcome='error';detail+='；未能自动停止录音：'+str(error)+'。请在游戏中手动停止录音。'
                 finally:
                     close = getattr(backend, "close", None)
                     if close:close()
             except Exception as error:
                 outcome, detail = "error", f"释放输入失败：{error}"
             self.origin = 0
+            if getattr(self,'recording_sync',None) is not None:
+                detail+='；游戏录音需在游戏中手动停止'
             self.transaction=False;self.pause_requested=False
             self.emit("note", (-1, ()))
             self.emit(outcome, detail)

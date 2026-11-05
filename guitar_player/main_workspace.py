@@ -32,6 +32,7 @@ def build(app):
     app.score_tools=ttk.Menubutton(app.source_actions,text='曲谱工具 ▾')
     app.score_menu=tk.Menu(app.score_tools,tearoff=False);app.score_tools.configure(menu=app.score_menu)
     app.score_menu.add_command(label='指弹／混合转译…',command=app.open_translator)
+    app.score_menu.add_command(label='双轨编谱：伴奏＋主旋律…',command=lambda:app.open_recording_sync().open_duet_editor())
     app.score_menu.add_command(label='预览指法适配（品格模式）',command=app.adapt_fingering)
     app.score_menu.add_separator()
     app.score_menu.add_command(label='载入试弹《小星星》',command=app.load_demo)
@@ -61,8 +62,19 @@ def build(app):
     app.settings_menu.add_command(label='输入时序与日志…',command=lambda:app.open_game_settings('timing'))
     app.settings_menu.add_command(label='分模式起始页…',command=lambda:app.open_game_settings('pages'))
     app.settings_menu.add_command(label='鼠标与手柄…',command=app.open_strum_settings)
+    app.settings_menu.add_command(label='录音合奏…',command=app.open_recording_sync)
     app.settings_menu.add_separator()
     app.settings_menu.add_command(label='时间线预演（不发输入）',command=lambda:app.start(False))
+
+    performance=ttk.Frame(app,padding=(20,0,20,8));performance.pack(fill='x');app.performance_options=performance
+    ttk.Label(performance,text='输入档位').pack(side='left')
+    from .timing import LABELS
+    app.main_speed_box=ttk.Combobox(performance,textvariable=app.input_speed,values=tuple(LABELS),state='readonly',width=23)
+    app.main_speed_box.pack(side='left',padx=(6,10));app.main_speed_box.bind('<<ComboboxSelected>>',app.input_speed_changed)
+    app.timing_settings_button=ttk.Button(performance,text='时序设置…',command=app.timing_dialog,padding=(8,4))
+    app.timing_settings_button.pack(side='left')
+    app.recording_sync_button=ttk.Button(performance,text='录音合奏…',command=app.open_recording_sync,style='Workspace.Compose.TButton')
+    app.recording_sync_button.pack(side='right')
 
     bottom=ttk.Frame(app,padding=(20,0,20,9));bottom.pack(side='bottom',fill='x')
     app.timeline=tk.Canvas(bottom,height=64,background=BG,highlightthickness=0)

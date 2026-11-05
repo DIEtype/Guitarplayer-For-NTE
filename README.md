@@ -1,16 +1,23 @@
 # Guitarplayer For NTE · 异环吉他编曲器
 
-Windows 桌面吉他编谱与自动演奏工具，by Akari。当前版本 **v0.12.12**，提供独立 EXE，无需安装 Python。
+Windows 桌面吉他编谱与自动演奏工具，by Akari。试用版 **v0.13.4**，提供独立 EXE，无需安装 Python。
 
 ## 下载与教程
 
-[下载 v0.12.12 Windows 便携包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.12.12/NTE-Guitar-Player-v0.12.12-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
+[下载 v0.13.4 Windows 试用包](https://github.com/DIEtype/Guitarplayer-For-NTE/releases/download/v0.13.4/NTE-Guitar-Player-v0.13.4-Windows.zip) · [全部版本](https://github.com/DIEtype/Guitarplayer-For-NTE/releases)
 
 [视频教程 · Bilibili](https://www.bilibili.com/video/BV1UMnL6yEkV/) · [百度网盘备用入口](https://pan.baidu.com/s/1Zk7ZYHZxvSpX1IQWtjLZGw?pwd=9w2e)，提取码 **9w2e**。网盘内文件版本以实际提供的文件为准。
 
 完整解压到可写的文件夹，双击 **NTEGuitarPlayer.exe**。游戏演奏会申请管理员权限，以匹配游戏权限；离线编谱可带 `--no-admin` 启动。程序使用明音凛头像图标，来源说明见 [assets/icon-source.md](assets/icon-source.md)。
 
 升级前关闭旧窗口，保留原目录的 `library/` 和 `settings/`，再替换程序。曲库、校准、个人节奏预设与引导状态保存在本机，不随发布包提供。
+
+## v0.13.4 试用版
+
+- **双轨编谱与录音合奏**。支持 MIDI 或指弹原谱拆成伴奏和旋律，分别编辑、合成试听，并按曲目保存录音码和对齐偏移。
+- **长谱响应**。移动光标复用原有谱面，编辑双轨时仅重新处理有改动的一轨，滚动按可见小节绘制。
+- **窗口切换**。主界面、编谱和合奏可以并存，同类窗口复用。应用两轨后直接回到合奏页。
+- **自定义节奏**。在“音符与奏法”里可将当前小节存为预设，供其他曲目使用。
 
 ## v0.12.12 修复
 

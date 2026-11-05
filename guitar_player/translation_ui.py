@@ -91,8 +91,8 @@ class TranslationWindow(tk.Toplevel):
         self.ornaments=tk.BooleanVar(value=True)
         ttk.Checkbutton(ornament_row,text='装饰音适配：主音准拍，先提前，来不及合并／省略',
                         variable=self.ornaments,command=self.invalidate).pack(side='left')
-        self.avoid_bm_second=tk.BooleanVar(value=True)
-        ttk.Checkbutton(ornament_row,text='临时规避 Bm 2 弦异常',variable=self.avoid_bm_second,command=self.invalidate).pack(side='left',padx=8)
+        self.avoid_bm_second=tk.BooleanVar(value=False)
+        ttk.Checkbutton(ornament_row,text='兼容旧版：规避 Bm 2 弦错音',variable=self.avoid_bm_second,command=self.invalidate).pack(side='left',padx=8)
         voice_row=ttk.Frame(frame);voice_row.pack(fill='x',pady=(0,6))
         ttk.Label(voice_row,text='伴奏').pack(side='left')
         self.accompaniment=tk.StringVar(value=POLICIES['sparse']);self.distorted_only=tk.BooleanVar(value=True)
@@ -217,7 +217,10 @@ class TranslationWindow(tk.Toplevel):
                 if score is not None:
                     from .fingerstyle_document import FingerstyleDocument
                     document=FingerstyleDocument.from_score(score)
-            self.parent.open_fingerstyle_editor(document)
+            editor=self.parent.open_fingerstyle_editor(document)
+            if editor is not None:
+                from .navigation import navigate
+                navigate(self,editor,editor.canvas,hide_owner=True)
         except (ValueError,OSError) as error:self.feedback.set('原谱编曲无法打开：'+str(error))
 
     def convert(self):
@@ -515,7 +518,8 @@ class TranslationWindow(tk.Toplevel):
             self.feedback.set(message);self.parent.status.set(message)
             messagebox.showerror('无法应用转译结果',message,parent=self)
             return
-        self.destroy()
+        from .navigation import suppress_return
+        suppress_return(self);self.destroy()
 
     def save_report(self):
         report=self.report
@@ -565,7 +569,7 @@ class TranslationWindow(tk.Toplevel):
         for key in CHORD_NAMES:
             item=self.rows.get((tone,key),refs[key])
             state='游戏实测' if item.measured and item.complete else '部分未知' if not item.complete else '参考指法 · 未实测'
-            if key=='Bm':state+='；2弦可临时规避'
+            if key=='Bm':state+='；2弦 D4；旧版错音可勾选兼容规避'
             self.table.insert('','end',iid=key,text=key,values=(*(format_pitch(p) for p in item.pitches),state))
         self.table.selection_set(name);self.select_row()
 

@@ -2,6 +2,7 @@
 from dataclasses import dataclass,replace
 from fractions import Fraction as F
 from bisect import bisect_right
+from collections import defaultdict,deque
 import copy
 import json
 import math
@@ -227,7 +228,7 @@ class FingerstyleDocument(TabDocument):
                 events.append(GuitarEvent((),cursor,length,active(cursor),'休止',1));cursor+=length
         for cell in self.cells:
             rest(cell.start)
-            events.append(GuitarEvent(cell.notes,cell.start,cell.beats,active(cell.start),'原谱',1));cursor=cell.end
+            events.append(GuitarEvent(cell.notes,cell.start,cell.beats,active(cell.start),'原谱',1));cursor=max(cursor,cell.end)
         rest(max(cursor,self.layout[-1].end))
         tempos=tuple((at,tempo*self.source_bpm/self.bpm) for at,tempo in self.tempo_map)
         score=GuitarScore(tuple(events),cursor,self.bpm,tempos,self.meter,self.bars,
@@ -243,10 +244,11 @@ class FingerstyleDocument(TabDocument):
         from .voicings import available_voicings
         rows=rows or {};score=self.score();points=timbre_points(score);starts=[p[0] for p in points]
         tables={tone:available_voicings(rows,tone,reference) for tone in ('clean','distorted')}
-        events=[];reference_hits=0;cells={c.start:c for c in self.cells};sweeps=[];hints=[]
+        events=[];reference_hits=0;cells=defaultdict(deque);sweeps=[];hints=[]
+        for cell in self.cells:cells[cell.start].append(cell)
         from .voice_roles import NoteHint
         for event in score.events:
-            cell=cells.get(event.start)
+            cell=cells[event.start].popleft() if event.label=='原谱' and cells[event.start] else None
             if not cell or not cell.notes:events.append(event);continue
             tone=points[max(0,bisect_right(starts,event.start)-1)][1];pitches=[];label=event.chord
             for string in cell.members:

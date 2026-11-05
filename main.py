@@ -43,6 +43,15 @@ def launch():
             if settings.pages['chord'].get()!='1' or settings.pages['fret'].get()!='1':
                 raise RuntimeError('分模式起始页设置初始值异常')
             settings.destroy()
+            recording=app.open_recording_sync();recording.withdraw();app.update_idletasks()
+            if (recording.start_button.cget('text')!='5 秒后自动录制' or recording.capture_button.cget('text')!='5 秒后自动录制'
+                    or len(recording.record_pick_buttons)!=2 or app.main_speed_box.cget('textvariable')!=str(app.input_speed)):
+                raise RuntimeError('录音合奏入口或主界面输入档位异常')
+            splitter=recording.open_splitter();splitter.withdraw();app.update_idletasks()
+            if splitter.strategy.get()!='伴奏＋主旋律' or splitter.generate_button.cget('text')!='开始自动拆分':
+                raise RuntimeError('MIDI／指弹双声部自动拆分入口异常')
+            splitter.destroy()
+            recording.destroy()
             if not app.open_usage_tour() or app.usage_tour.index!=0:
                 raise RuntimeError('无法重新打开操作引导')
             app.usage_tour.next()

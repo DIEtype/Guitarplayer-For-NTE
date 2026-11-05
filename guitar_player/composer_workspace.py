@@ -27,7 +27,7 @@ def styles(editor):
     for name,color,active in (('Load',LOAD,'#095863'),('Translate',TRANSLATE,'#8b4008')):
         style.configure(f'Composer.{name}.TButton',background=color,foreground='white',
                         padding=(15,10),font=('Microsoft YaHei UI',10,'bold'),borderwidth=0)
-        style.map(f'Composer.{name}.TButton',background=[('active',active),('pressed',active)],foreground=[('disabled','#dde2e7')])
+        style.map(f'Composer.{name}.TButton',background=[('disabled','#d4dde3'),('active',active),('pressed',active)],foreground=[('disabled','#657682')])
 
 
 def button(parent,text,command,**options):
@@ -41,9 +41,10 @@ def build_workspace(e):
     ttk.Label(heading,text='原谱工作区',style='Composer.Muted.TLabel').pack(side='left',padx=(12,0))
     e.credit_label=ttk.Label(heading,text='by Akari',style='Composer.Muted.TLabel')
     e.credit_label.pack(side='left',padx=(14,0))
+    if not hasattr(e,'documents'):
+        e.duet_button=button(heading,'双轨编谱…',e.open_duet_workspace);e.duet_button.pack(side='left',padx=12)
     button(heading,'新建',e.clear).pack(side='right')
     button(heading,'打开原谱…',e.open_file).pack(side='right',padx=5)
-    e.pattern_button=button(heading,'节奏预设…',e.pattern_dialog);e.pattern_button.pack(side='right',padx=5)
     settings=ttk.Frame(e,style='Composer.TFrame',padding=(16,0,16,8));settings.pack(fill='x')
     ttk.Label(settings,text='BPM',style='Composer.TLabel').pack(side='left')
     bpm=ttk.Spinbox(settings,textvariable=e.bpm,from_=20,to=360,width=5,command=e.settings_changed)
@@ -62,12 +63,12 @@ def build_workspace(e):
     ttk.Label(settings,text='吸附',style='Composer.TLabel').pack(side='left',padx=(12,4))
     ttk.Combobox(settings,textvariable=e.grid_name,values=tuple(GRIDS),width=7,state='readonly').pack(side='left')
     button(settings,'重做',e.redo).pack(side='right');button(settings,'撤销',e.undo).pack(side='right',padx=4)
-    e.tool_tabs=ttk.Notebook(e,style='Composer.TNotebook',height=130);e.tool_tabs.pack(fill='x',padx=12)
+    e.tool_tabs=ttk.Notebook(e,style='Composer.TNotebook',height=166);e.tool_tabs.pack(fill='x',padx=12)
     e.note_tools=ttk.Frame(e.tool_tabs,style='Composer.TFrame',padding=(8,7))
     e.measure_tools=ttk.Frame(e.tool_tabs,style='Composer.TFrame',padding=(8,7))
     e.tool_tabs.add(e.note_tools,text='音符与奏法');e.tool_tabs.add(e.measure_tools,text='小节与反复')
     build_notes(e,e.note_tools);build_measures(e,e.measure_tools)
-    context=ttk.Frame(e,style='Composer.TFrame',padding=(16,7));context.pack(fill='x')
+    context=ttk.Frame(e,style='Composer.TFrame',padding=(16,5));context.pack(fill='x')
     e.selection_info=tk.StringVar();e.clipboard_info=tk.StringVar(value='剪贴板为空')
     ttk.Label(context,textvariable=e.selection_info,style='Composer.TLabel',font=('Microsoft YaHei UI',9,'bold')).pack(side='left')
     ttk.Label(context,textvariable=e.clipboard_info,style='Composer.Muted.TLabel').pack(side='left',padx=14)
@@ -103,8 +104,8 @@ def build_notes(e,parent):
     ttk.Checkbutton(modifiers,text='附点 ·',variable=e.dot_var,command=e.choose_modifiers).pack(anchor='w')
     ttk.Checkbutton(modifiers,text='三连音 3',variable=e.triplet_var,command=e.choose_modifiers).pack(anchor='w')
     tools=ttk.Frame(rhythm,style='Composer.TFrame');tools.pack(side='left')
-    button(tools,'休止 R',e.put_rest).pack(side='left',padx=3);button(tools,'删音 Del',e.delete).pack(side='left')
-    ties=ttk.Menubutton(tools,text='延音线 ▾');ties.pack(side='left',padx=5)
+    button(tools,'休止 R',e.put_rest,width=7).pack(side='left',padx=3);button(tools,'删音 Del',e.delete,width=8).pack(side='left')
+    ties=ttk.Menubutton(tools,text='延音线 ▾',width=8);ties.pack(side='left',padx=5)
     e.tie_menu=tk.Menu(ties,tearoff=False);ties.configure(menu=e.tie_menu)
     for text,command in (('连接下一同音 T',e.tie_next),('延长所选时值',e.extend_note),('断开延音 Shift+T',e.split_tie)):
         e.tie_menu.add_command(label=text,command=command)
@@ -112,15 +113,15 @@ def build_notes(e,parent):
     ttk.Label(row,text='和弦',style='Composer.TLabel').pack(side='left')
     e.chord=tk.StringVar(value=e.doc.chord_at(e.at) or 'D')
     box=ttk.Combobox(row,textvariable=e.chord,values=CHORD_NAMES,width=9);box.pack(side='left',padx=4)
-    box.bind('<Return>',lambda event:e.mark_chord());button(row,'标记此处',e.mark_chord).pack(side='left')
-    button(row,'移除',lambda:e.edit(lambda:e.doc.remove_chord(e.at))).pack(side='left',padx=4)
+    box.bind('<Return>',lambda event:e.mark_chord());button(row,'标记此处',e.mark_chord,width=8).pack(side='left')
+    button(row,'移除',lambda:e.edit(lambda:e.doc.remove_chord(e.at)),width=5).pack(side='left',padx=4)
     ttk.Separator(row,orient='vertical').pack(side='left',fill='y',padx=8)
     for text,command in (('X',lambda:e.put_hit(HIT_X)),('●',lambda:e.put_hit(HIT_DOT)),
                          ('↑ 上扫 U',lambda:e.put_sweep(UP)),('↓ 下扫 D',lambda:e.put_sweep(DOWN))):
-        button(row,text,command).pack(side='left',padx=2)
+        button(row,text,command,width=3 if text in ('X','●') else 9).pack(side='left',padx=2)
     e.sequence=tk.StringVar(value='020')
-    button(row,'连续录入…',e.sequence_dialog).pack(side='left',padx=4)
-    e.cleanup_button=ttk.Menubutton(row,text='更多 ▾');e.cleanup_button.pack(side='right')
+    button(row,'连续录入…',e.sequence_dialog,width=11).pack(side='left',padx=4)
+    e.cleanup_button=ttk.Menubutton(row,text='更多 ▾',width=7);e.cleanup_button.pack(side='right')
     more=tk.Menu(e.cleanup_button,tearoff=False);e.cleanup_button.configure(menu=more)
     e.cleanup_menu=tk.Menu(more,tearoff=False)
     for value,label in ((30,'30 ms · 细微错位'),(50,'50 ms · 轻微琶音'),(100,'100 ms · 收拢滚奏')):
@@ -130,6 +131,11 @@ def build_notes(e,parent):
     for text,command in (('插入空节拍… Insert',e.insert_beat_dialog),('删除整列节拍 Ctrl+Del',e.delete_beat),('清空整列音符 Shift+Del',e.clear_column)):
         e.beat_menu.add_command(label=text,command=command)
     more.add_cascade(label='节拍操作',menu=e.beat_menu)
+    presets=ttk.Frame(parent,style='Composer.TFrame');presets.pack(fill='x',pady=(6,0))
+    ttk.Label(presets,text='节奏',style='Composer.Muted.TLabel').pack(side='left',padx=(0,8))
+    e.pattern_button=button(presets,'节奏预设…',e.pattern_dialog,width=14);e.pattern_button.pack(side='left')
+    button(presets,'将当前小节存为预设…',e.save_rhythm_dialog,width=22).pack(side='left',padx=6)
+    ttk.Label(presets,text='分解、扫弦与混合节奏 · 可跨曲目复用',style='Composer.Muted.TLabel').pack(side='left',padx=8)
 
 
 def build_measures(e,parent):

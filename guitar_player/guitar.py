@@ -69,7 +69,7 @@ class GuitarScore:
     @cached_property
     def _tempo_index(self):
         """Prefix times belong to this immutable score, rebuilt on replace()."""
-        starts=[Fraction(0)];seconds=[0.0];tempos=[500000]
+        starts=[Fraction(0)];seconds=[0.0];tempos=[60_000_000/self.bpm]
         for at,tempo in self.tempo_map:
             at=Fraction(at)
             total=seconds[-1]+float(at-starts[-1])*tempos[-1]/1_000_000
@@ -283,6 +283,10 @@ def make_plan(score, profile, gate=0.72, lead=None, tap=0.045,timing=None,sustai
         if at>=score.beats:continue
         if target==tone:continue
         boundary=score.seconds_at(at)
+        if at==0 and sounded:
+            # Initial silence is available for preparing the first tone; a
+            # rest marker at time zero does not require a V key before zero.
+            boundary=max(boundary,sounded[0][0])
         position=bisect_left(onsets,boundary)
         previous=sounded[position-1][1] if position else -1e9
         next_note=sounded[position][0] if position<len(sounded) else score.seconds+tone_lead
@@ -292,7 +296,7 @@ def make_plan(score, profile, gate=0.72, lead=None, tap=0.045,timing=None,sustai
         steps.extend((Step(press_at,'timbre_down',target),Step(press_at+tone_hold,'timbre_up')))
         tone=target
     if profile.initial_mode is not None and profile.initial_mode != profile.mode and sounded:
-        first=min(s.at for s in steps)
+        first=min(s.at for s in steps if s.kind!='note' or s.data[1])
         steps.extend((Step(first-.18,'mode_down',profile.mode),Step(first-.13,'mode_up',profile.mode)))
     steps.append(Step(max(score.seconds,previous_release), "end"))
     plan=tuple(sorted(steps,key=lambda step:step.at))
