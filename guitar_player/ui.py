@@ -1000,6 +1000,31 @@ class App(tk.Tk):
         self.player.stop()
         self.input_probe.stop()
 
+    def part_playback_profile(self,part,*,solo=False):
+        from .duet_project import MODE_NAMES
+
+        self._apply_strum_input()
+        mode='chord' if self.game_mode.get()=='和弦' else 'fret'
+        profile=copy.deepcopy(self.profiles[MODE_NAMES[part.mode]])
+        profile.initial_mode=mode
+        profile.initial_timbre=next(key for key,label in TONE_NAMES.items() if label==self.game_timbre.get())
+        page=int(self.page.get())-1;limit=4 if mode=='chord' else 5
+        if not 0<=page<limit:raise ValueError('请按游戏实际状态填写当前页码：和弦 1～4 页，品格 1～5 页')
+        if profile.mode=='mixed':
+            profile.initial_pages[mode]=page
+            profile.initial_page=page
+        elif profile.mode==mode:profile.initial_page=page
+        elif solo:profile.initial_page=self.profiles['混合模式'].initial_pages[profile.mode]
+        return profile
+
+    def start_solo(self,part,feedback):
+        if self.busy:
+            feedback.set('请先停止当前演奏或试听。')
+            return
+        self.start(True,duet_part=part)
+        feedback.set(f'{part.name}将在 5 秒后开始演奏。请切回游戏，F9 停止。'
+                     if self.player.running else self.status.get())
+
     def start(self, real, audible=False, recording_sync=None,recording_capture=None,duet_part=None):
         if self.busy:
             return
@@ -1028,15 +1053,8 @@ class App(tk.Tk):
             if duet_part is None:
                 profile=copy.deepcopy(self.profile)
             else:
-                from .duet_project import MODE_NAMES
-                self._apply_strum_input()
-                profile=copy.deepcopy(self.profiles[MODE_NAMES[duet_part.mode]])
-                profile.initial_mode='chord' if self.game_mode.get()=='和弦' else 'fret'
-                profile.initial_timbre=next(key for key,label in TONE_NAMES.items() if label==self.game_timbre.get())
-                page=int(self.page.get())-1;limit=4 if profile.initial_mode=='chord' else 5
-                if not 0<=page<limit:raise ValueError('请按游戏实际状态填写当前页码：和弦 1～4 页，品格 1～5 页')
-                if profile.mode=='mixed':profile.initial_pages[profile.initial_mode]=page
-                elif profile.mode==profile.initial_mode:profile.initial_page=page
+                solo=real and recording_sync is None and recording_capture is None
+                profile=self.part_playback_profile(duet_part,solo=solo)
             if audible:
                 if profile.mode != "fret":
                     raise ValueError("和弦音高尚未核对；请在“游戏设置 → 时间线预演”查看动作节奏，或在游戏中试听")
@@ -1071,7 +1089,9 @@ class App(tk.Tk):
                 trace=InputTrace(app_root()/"logs","auto_play",buffered=True)
                 trace.record("score",events=len(score.events),seconds=score.seconds,bpm=score.bpm,input_speed=self.input_timing.key)
                 trace.record('note_duration',sustain_notes=self.sustain_notes.get())
-                if duet_part is not None:trace.record('duet_part',role='recorded' if recording_capture is not None else 'live',name=duet_part.name)
+                if duet_part is not None:
+                    role='recorded' if recording_capture is not None else 'live' if recording_sync is not None else 'solo'
+                    trace.record('duet_part',role=role,name=duet_part.name)
                 trace.record('timing_config',**self.input_timing.__dict__,learned_margin=self.learn_logs.get() and self.log_estimate.ready)
                 if self.input_timing.key=='adaptive' and profile.mode=='fret':trace.record('adaptation',summary=getattr(self,'adaptive_report','保留当前指法'))
                 self.last_input_trace=trace.path
@@ -1350,13 +1370,40 @@ class App(tk.Tk):
         except (ValueError, OSError) as error:
             self.status.set("保存失败：" + str(error))
 
+    def import_guitar_pro(self,path=None,*,owner=None,editor=None):
+        from .guitar_pro import EXTENSIONS, FILE_FILTER
+        from .guitar_pro_ui import GuitarProImportDialog
+        from .navigation import navigate, present
+
+        owner=editor or owner or self
+        feedback=self.status if owner is self else owner.feedback
+        if self.busy:
+            feedback.set('请先停止演奏，再导入 Guitar Pro。')
+            return
+        if editor is None and not self.editor_allows_replacement():return
+        dialog=getattr(self,'guitar_pro_window',None)
+        if dialog is not None and dialog.winfo_exists():
+            if dialog.pending or (getattr(dialog,'_navigation_owner',None) is owner and (path is None or dialog.path==Path(path))):
+                return present(dialog)
+        path=path or filedialog.askopenfilename(parent=owner,title='导入 Guitar Pro',filetypes=[FILE_FILTER])
+        if not path:return
+        if Path(path).suffix.lower() not in EXTENSIONS:
+            feedback.set('请选择 .gp、.gpx、.gp5、.gp4 或 .gp3 曲谱。')
+            return
+        if dialog is not None and dialog.winfo_exists():dialog.destroy()
+        self.guitar_pro_window=GuitarProImportDialog(self,path,source_editor=editor)
+        return navigate(owner,self.guitar_pro_window)
+
     def open_score(self,path=None):
         if self.busy:
             return
         if not self.editor_allows_replacement():return
-        path = path or filedialog.askopenfilename(parent=self, filetypes=[("曲谱", "*.gscore *.txt"), ("所有文件", "*.*")])
+        from .guitar_pro import EXTENSIONS, FILE_FILTER
+        path = path or filedialog.askopenfilename(parent=self, filetypes=[("曲谱", f"*.gscore *.tab *.txt {FILE_FILTER[1]}"), FILE_FILTER, ("所有文件", "*.*")])
         if not path:
             return
+        if Path(path).suffix.lower() in EXTENSIONS:
+            return self.import_guitar_pro(path)
         try:
             raw = Path(path).read_text(encoding="utf-8-sig")
             source_document=None

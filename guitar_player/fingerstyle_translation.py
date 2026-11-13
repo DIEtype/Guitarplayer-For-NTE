@@ -1,5 +1,6 @@
 """Translate pitched TAB to playable chord/fret actions with an auditable report."""
 from bisect import bisect_right
+from collections import Counter
 from dataclasses import dataclass,replace
 from fractions import Fraction as F
 from functools import lru_cache
@@ -33,6 +34,11 @@ class PitchSource:
     chord_capo:int=0  # Chord labels are relative to this capo; pitches are already absolute.
     note_hints:tuple=()
     protected_marks:tuple=()  # Absolute (beat, pitches) protected before arrangement.
+    optional_sweeps:tuple=()  # Imported numeric strums can fall back to ordinary picks.
+    sweep_targets:tuple=()  # Beat and original strummed pitches, separate from simultaneous other voices.
+    lane_timbres:tuple=()  # In a written duet, keep each lane's own timbre map.
+    lane_sweeps:tuple=()  # ((beat, role), direction) for a duet's reference audition.
+    lane_sources:tuple=()  # (role, original PitchSource) before voices are merged.
 
 
 def _is_tab(text):return bool(re.search(r'(?m)^\s*[A-Ga-g1-6]\s*\|',text))
@@ -116,6 +122,18 @@ class Choice:
     def page(self):return CHORD_PAGE_INDEX[self.selector] if self.mode=='chord' else (4 if self.selector=='Zero' else ROMAN.index(self.selector)//6)
 
 
+def sweep_choice(wanted, protected, item, direction, approximate=False):
+    strings = tuple(s for s, pitch in enumerate(item.pitches, 1) if pitch is not None and pitch >= 0)
+    sounding = tuple(item.pitches[s-1] for s in strings)
+    pitches = set(sounding)
+    if pitches != wanted:
+        if not (approximate and pitches and protected.issubset(pitches) and
+                min(pitches) == min(wanted) and max(pitches) == max(wanted) and
+                {p % 12 for p in pitches} == {p % 12 for p in wanted}):
+            return None
+    return Choice('chord', item.name, strings, sounding, tuple(sorted(wanted-pitches)), (), item.measured, direction)
+
+
 def _match(wanted,voiced,mode,selector,measured=False,octaves=False,protected=(),resources=None):
     protected=set(protected) or {max(wanted)};melody=max(protected)
     if not protected.issubset(voiced):return None
@@ -175,8 +193,9 @@ def transpose_source(source,semitones):
     marks=tuple((at,transpose_chord(name,semitones+source.chord_capo)) for at,name in source.chord_marks)
     hints=tuple(replace(h,pitch=h.pitch+semitones) for h in source.note_hints)
     protected=tuple((at,tuple(p+semitones for p in pitches)) for at,pitches in source.protected_marks)
+    targets=tuple((at,tuple(p+semitones for p in pitches)) for at,pitches in source.sweep_targets)
     return replace(source,score=replace(source.score,events=tuple(events)),chord_marks=marks,chord_capo=0,
-                   note_hints=hints,protected_marks=protected)
+                   note_hints=hints,protected_marks=protected,sweep_targets=targets)
 
 
 def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octaves=False,beam=48,*,transpose=0,cancel=None,sustain_notes=False,ornaments=False,progress=None,analyze_voices=False,accompaniment='all',distorted_only=True,melody_channel=None,voice_overrides=(),avoid_bm_second=False,filter_low_bass=False,high_main_octave=False,_analysis_cache=None):
@@ -209,6 +228,7 @@ def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octav
     nodes=[_Node((mode,None,pages['chord'],pages['fret'],profile.initial_timbre),(0,0,0,0.0,0))]
     marks=sorted(source.chord_marks);mark_starts=[at for at,_ in marks]
     sweeps=dict(source.sweeps)
+    optional_sweeps=set(source.optional_sweeps)
     protected_marks=dict(source.protected_marks)
     def marked(at):
         i=bisect_right(mark_starts,at)-1
@@ -220,24 +240,23 @@ def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octav
     fret_voicings={f:tuple(fret_pitch(s,f) for s in range(1,7)) for f in range(25)}
     gamepad_sweeps=profile.strum_input=='gamepad'
     @lru_cache(maxsize=4096)
-    def event_choices(wanted,protected,tone,sweep):
+    def event_choices(wanted,protected,tone,sweep,allow_pick=False):
         wanted=set(wanted);protected=set(protected);choices=[]
-        def candidate(voiced,mode,selector,measured=False):
-            if not sweep:return _match(wanted,voiced,mode,selector,measured,octaves,protected,resources)
-            sounding=tuple(p for p in voiced if p is not None and p>=0)
-            if set(sounding)!=wanted:return None
-            return Choice(mode,selector,tuple(s for s,p in enumerate(voiced,1) if p is not None and p>=0),sounding,(),(),measured,sweep)
         for item in tables[tone].values():
             voiced=item.pitches
             if avoid_bm_second and item.name=='Bm':
                 # Keep theoretical D4, but avoid the game's anomalous string.
-                if sweep:continue
                 voiced=(voiced[0],None,*voiced[2:])
-            option=candidate(voiced,'chord',item.name,item.measured)
-            if option:choices.append(option)
-        for fret in sorted({f for _,f in positions_for_pitch(max(protected))}):
-            option=candidate(fret_voicings[fret],'fret',ROMAN[fret-1] if fret else 'Zero')
-            if option:choices.append(option)
+            if sweep and not (avoid_bm_second and item.name=='Bm'):
+                option=sweep_choice(wanted,protected,item,sweep,allow_pick)
+                if option:choices.append(option)
+            if not sweep or allow_pick:
+                option=_match(wanted,voiced,'chord',item.name,item.measured,octaves,protected,resources)
+                if option:choices.append(option)
+        if not sweep or allow_pick:
+            for fret in sorted({f for _,f in positions_for_pitch(max(protected))}):
+                option=_match(wanted,fret_voicings[fret],'fret',ROMAN[fret-1] if fret else 'Zero',False,octaves,protected,resources)
+                if option:choices.append(option)
         return tuple(choices)
     @lru_cache(maxsize=16384)
     def transition(before,selector,current,before_tone,before_action,mode,selected,action,tone):
@@ -260,7 +279,7 @@ def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octav
         tone=points[max(0,bisect_right(tone_starts,event.start)-1)][1]
         preferred=marked(event.start)
         sweep=sweeps.get(event.start,0)
-        choices=event_choices(tuple(sorted(wanted)),tuple(sorted(protected)),tone,sweep)
+        choices=event_choices(tuple(sorted(wanted)),tuple(sorted(protected)),tone,sweep,event.start in optional_sweeps)
         if not choices:
             if sweep and preferred=='Bm' and avoid_bm_second:
                 raise TranslationFailure(f'拍位 {event.start} 的 Bm 扫弦会触及临时规避的 2 弦，暂无等音扫弦按法；'
@@ -280,7 +299,8 @@ def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octav
         gap=at-score.seconds_at(previous.start) if previous else 1e9
         best={};attack_cache={}
         for option in choices:
-            loss=len(option.omitted)*10+(20 if bass in option.omitted else 0)
+            lost_sweep=event.start in optional_sweeps and not option.sweep
+            loss=len(option.omitted)*10+(20 if bass in option.omitted else 0)+15*lost_sweep
             action=option.action;action_resources=tuple(resources[n] for n in action)
             octave_count=len(option.octaves);hint_miss=int(preferred in tables[tone] and option.selector!=preferred)
             for node in nodes:
@@ -348,6 +368,10 @@ def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octav
                         'basis':'measured' if option.mode=='chord' and option.measured else 'reference' if option.mode=='chord' else 'standard_tuning'})
         details[-1].update(timing_conflict=bool(conflict),required_ms=required*1000,
                            available_ms=None if before is None else available*1000)
+        if event.start in optional_sweeps:
+            details[-1]['strum_added_pitches'] = sorted(set(option.pitches)-set(event.notes)) if option.sweep else []
+            details[-1]['strum_approximation'] = ('改为拨弦' if not option.sweep else
+                '保留方向，替换内声部' if set(option.pitches)!=set(event.notes) else '原方向与音高保留')
         before=option;before_at=event.start;before_tone=tone;current_pages[option.mode]=option.page
         for n in option.action:attacks[input_resource(n,profile)]=at
     result=replace(score,events=tuple(events),capo=0,chord_changes=())
@@ -371,6 +395,9 @@ def translate(source,rows,profile=None,timing=None,tap=.045,reference=True,octav
     if reference_count:summary+=f'；{reference_count} 处采用无 Capo 参考指法，游戏音高尚未实测'
     elif not chord_count:summary+='；当前选出的路线全部使用品格'
     if source.reference_hits:summary+=f'；原谱 {source.reference_hits} 个 X／点按参考弦音解析，尚未实测'
+    if optional_sweeps:
+        changed=Counter(row.get('strum_approximation') for row in details)
+        summary+=f"；导入扫弦：{changed['保留方向，替换内声部']} 处替换内声部，{changed['改为拨弦']} 处改为拨弦"
     if avoid_bm_second:summary+='；已临时规避 Bm 2 弦异常（理论仍为 D4）'
     if warning:summary+='；游戏时序需调整：'+warning
     report={'version':1,'source':source.name,'reference_allowed':reference,'octave_adjustment':octaves,

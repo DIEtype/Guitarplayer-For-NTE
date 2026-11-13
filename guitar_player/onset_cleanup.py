@@ -38,8 +38,8 @@ def _report(window_ms):
             'unresolved_groups':0,'changes':[]}
 
 
-def _assign_strings(group):
-    preferred=sorted(((STANDARD_TUNING[s]+cell.values[s-1],s,cell.values[s-1])
+def _assign_strings(group, tuning):
+    preferred=sorted(((tuning[s]+cell.values[s-1],s,cell.values[s-1])
                      for cell in group for s in cell.members),key=lambda item:(-item[0],item[1]))
     if len(preferred)>6:return None,0
     highest=preferred[0][0];best=None;best_cost=None
@@ -48,7 +48,7 @@ def _assign_strings(group):
         if best_cost is not None and cost>=best_cost:return
         if index==len(preferred):best=list(route);best_cost=cost;return
         pitch,old_string,old_fret=preferred[index]
-        options=sorted(positions_for_pitch(pitch),key=lambda pos:(pos[0]!=old_string,abs(pos[1]-old_fret)))
+        options=sorted(positions_for_pitch(pitch,tuning=tuning),key=lambda pos:(pos[0]!=old_string,abs(pos[1]-old_fret)))
         for string,fret in options:
             if string in used:continue
             moved=int(string!=old_string)
@@ -72,24 +72,25 @@ def _changed(report, group, anchor, clock, members):
 def cleanup_document(document, window_ms=30):
     from .fingerstyle_document import FingerCell
     result=copy.deepcopy(document);clock=document.score();report=_report(window_ms)
+    tuning=dict(enumerate(document.tuning,1)) if hasattr(document,'tuning') else STANDARD_TUNING
     tempos=[at for at,_ in clock.tempo_map]
     from .measures import timbre_points
     tones=[at for at,_ in timbre_points(clock)]
     def keys(cell):
         if cell.sweep or not cell.members or any(type(cell.values[s-1]) is not int for s in cell.members):
             return None
-        return {STANDARD_TUNING[s]+cell.values[s-1] for s in cell.members}
+        return {tuning[s]+cell.values[s-1] for s in cell.members}
     def section(at):return bisect_right(tempos,at),bisect_right(tones,at),document.chord_at(at)
     cells=[]
     for group in _groups(document.cells,clock,window_ms,keys,section):
         if len(group)==1:
             cells.append(group[0]);continue
-        anchor_cell=max(group,key=lambda cell:(max(STANDARD_TUNING[s]+cell.values[s-1] for s in cell.members),-cell.start))
+        anchor_cell=max(group,key=lambda cell:(max(tuning[s]+cell.values[s-1] for s in cell.members),-cell.start))
         anchor=anchor_cell.start;values=[None]*6
         first_bar=document.bar_index(group[0].start);last_bar=document.bar_index(group[-1].start)
         if first_bar!=last_bar:
             anchor=document.bar(last_bar).start;report['barline_groups']+=1
-        assigned,moved=_assign_strings(group)
+        assigned,moved=_assign_strings(group,tuning)
         if assigned is None:
             cells.extend(group);report['unresolved_groups']+=1;continue
         for string,fret in assigned:values[string-1]=fret

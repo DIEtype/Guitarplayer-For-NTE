@@ -29,6 +29,7 @@ class VisualFingerstyleEditor(VisualTabEditor):
         self.file_path=Path(path) if path else None
         super().__init__(parent,document,on_apply)
         self.title('吉他编曲 · 原谱工作区 · by Akari');self.minsize(900,min(620,self.winfo_screenheight()-90))
+        self.geometry(f'{min(1460,self.winfo_screenwidth()-60)}x{min(900,self.winfo_screenheight()-80)}')
         self.canvas.bind('<Control-c>',lambda event:self.copy_selection())
         self.canvas.bind('<Control-v>',lambda event:self.paste_selection(False))
         self.canvas.bind('<Control-Shift-V>',lambda event:self.paste_selection(True))
@@ -49,6 +50,16 @@ class VisualFingerstyleEditor(VisualTabEditor):
         super().draw(width)
         from .composer_workspace import update_context
         update_context(self)
+
+    def select_cursor(self, at, string=None):
+        if string is not None and hasattr(self.doc, 'focus_string'):
+            self.doc.focus_string = string
+        return super().select_cursor(at, string)
+
+    def restore(self, state):
+        if hasattr(self.doc, 'focus_string'):
+            self.doc.focus_string = state[2]
+        super().restore(state)
 
     def edit(self,operation):
         result=super().edit(operation)
@@ -101,11 +112,10 @@ class VisualFingerstyleEditor(VisualTabEditor):
         if self.bar_selection and self.bar_selection[0]<=current<=self.bar_selection[1]:return self.bar_selection
         return current,current
 
-    def click(self,event):
+    def click_bar(self,index,box,x,y,state):
         anchor=self.bar_selection[0] if self.bar_selection else self.doc.bar_index(self.at)
-        super().click(event);current=self.doc.bar_index(self.at)
-        self.bar_selection=(min(anchor,current),max(anchor,current)) if getattr(event,'state',0)&1 else None
-        self.draw()
+        self.bar_selection=(min(anchor,index),max(anchor,index)) if state&1 else None
+        super().click_bar(index,box,x,y,state)
 
     def pattern_dialog(self):
         from .composition_ui import pattern_dialog
@@ -230,22 +240,21 @@ class VisualFingerstyleEditor(VisualTabEditor):
             self.doc.cells=[];self.doc.chord_changes={};self.doc.bars=4
             self.doc.measure_repeats=set();self.doc.repeat_sections=[];self.bar_selection=None
             self.doc.tempo_map=();self.doc.bar_changes={};self.doc.default_timbre='clean';self.doc.capo=0
+            from .music import STANDARD_TUNING
+            self.doc.tuning = tuple(STANDARD_TUNING.values())
         self.timbre.set('清音');self.capo.set('0');self.edit(change);self.select_cursor(0,1)
 
     def note_text(self,cell,string):
         value=cell.values[string-1]
         return 'X' if value==HIT_X else '●' if value==HIT_DOT else str(value)
 
-    def refresh(self):
-        super().refresh()
+    def cursor_feedback(self,current,note):
         active=self.doc.chord_at(self.at)
-        if active:self.chord.set(active)
-        current=self.doc.at(self.at);symbol=self.note_text(current,self.string) if current and current.values[self.string-1] is not None else '空位'
+        if active and self.chord.get()!=active:self.chord.set(active)
+        symbol=self.note_text(current,self.string) if current and current.values[self.string-1] is not None else '空位'
         if current and current.sweep:symbol='上扫 1→6' if current.sweep==UP else '下扫 6→1'
-        if current and identify_duration(current.beats) is None:
-            duration_ms=(self.draw_score.seconds_at(current.end)-self.draw_score.seconds_at(current.start))*1000
-            symbol+=f' · 特殊时值 {current.beats} 拍 ≈ {duration_ms:.1f} ms'
-        self.feedback.set(f'第 {self.doc.bar_index(self.at)+1} 小节 · {self.string} 弦 · {symbol} · 和弦 {active or "未标记"}  |  数字写品位，X／点拨和弦弦；U／D 扫弦；直接载入保留原谱')
+        if current and identify_duration(current.beats) is None:symbol+=f' · {current.beats} 拍'
+        self.feedback.set(f'第 {self.doc.bar_index(self.at)+1} 小节 · {self.string} 弦 · {symbol} · 和弦 {active or "未标记"}')
 
     def draw_bar(self,index,left,top,width):
         super().draw_bar(index,left,top,width)
@@ -268,8 +277,9 @@ class VisualFingerstyleEditor(VisualTabEditor):
                 for y in (top+99,top+121):self.canvas.create_oval(x+direction*12-2,y-2,x+direction*12+2,y+2,fill=FOCUS,outline=FOCUS,tags='repeat_barline')
                 if direction==-1:self.canvas.create_text(x-10,top+35,text=f'×{times}',anchor='e',fill=FOCUS,tags='repeat_barline')
         if index in self.doc.measure_repeats:return
-        changes=[(at,name) for at,name in sorted(self.doc.chord_changes.items()) if measure.start<=at<measure.end]
-        active=self.doc.chord_at(measure.start)
+        active,marks=self.draw_cells.chord_marks(measure.start,measure.end)
+        changes=list(marks)
+        if active=='N.C.':active=None
         if active and not any(at==measure.start for at,_ in changes):changes.insert(0,(measure.start,'('+active+')'))
         for at,name in changes:
             x=first+float(at-measure.start)/float(measure.beats)*span
@@ -361,8 +371,10 @@ class VisualFingerstyleEditor(VisualTabEditor):
         except (ValueError,OSError) as error:self.feedback.set(file_guidance(error,'保存'))
 
     def open_file(self,path=None):
-        path=path or filedialog.askopenfilename(parent=self,title='读取指弹原谱',filetypes=[('曲谱／六线谱','*.gscore *.tab *.txt')])
+        from .guitar_pro import EXTENSIONS, FILE_FILTER
+        path=path or filedialog.askopenfilename(parent=self,title='读取指弹原谱',filetypes=[('曲谱／六线谱',f'*.gscore *.tab *.txt {FILE_FILTER[1]}'),FILE_FILTER])
         if not path:return
+        if Path(path).suffix.lower() in EXTENSIONS:return self.parent.import_guitar_pro(path,editor=self)
         try:
             doc=read_document(path);self.keep_draft();self.undo_stack.append(self.snapshot());self.redo_stack=[]
             self.doc=doc;self.file_path=Path(path);self.applied_state=doc.snapshot()

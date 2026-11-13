@@ -48,6 +48,7 @@ class DuetTrackDocument(FingerstyleDocument):
     def set_meter(self,numerator,denominator):
         from .measures import valid_meter
         if not valid_meter((numerator,denominator)):raise ValueError('拍号分子 1～16，分母 1、2、4、8 或 16')
+        if self.meter == (numerator, denominator):return
         old=self.layout;self.meter=(numerator,denominator);self.relocate(old)
 
     def set_bar_change(self,index,bpm=None,meter=None,timbre=None):
@@ -87,12 +88,13 @@ class DuetTrackDocument(FingerstyleDocument):
     @classmethod
     def from_dict(cls,data):
         try:
-            header=copy.deepcopy(data);raw=header.get('cells',[]);header['cells']=[]
+            raw=data.get('cells',[]);header={**data,'cells':[]}
+            header.pop('base_part', None)
             base=FingerstyleDocument.from_dict(header)
             if not isinstance(raw,list) or len(raw)>50000:raise ValueError('双轨音符数量无效')
             cells=[FingerCell(F(c['start']),F(c['beats']),tuple(c['values']),c.get('sweep',0)) for c in raw]
             result=cls(cells,base.bpm,base.meter,base.bars,base.tempo_map,tuple(base.bar_changes.values()),base.default_timbre,base.capo,
-                       tuple(base.chord_changes.items()),base.measure_repeats,base.repeat_sections)
+                       tuple(base.chord_changes.items()),base.measure_repeats,base.repeat_sections,base.tuning)
             result.source_bpm=base.source_bpm
             for key in ('base_part','base_document'):
                 value=data.get(key,'')
@@ -148,7 +150,11 @@ def prepare_documents(project):
 
 
 def clock_matches(a,b):
-    sa,sb=a.score(),b.score();until=max(sa.beats,sb.beats)
+    return _score_clocks_match(a.score(),b.score())
+
+
+def _score_clocks_match(sa,sb):
+    until=max(sa.beats,sb.beats)
     points={F(0),until,*(at for at,_ in sa.tempo_map if at<=until),*(at for at,_ in sb.tempo_map if at<=until)}
     return sa.time_signature==sb.time_signature and all(abs(sa.seconds_at(at)-sb.seconds_at(at))<.001 for at in points)
 
@@ -156,18 +162,31 @@ def clock_matches(a,b):
 def combine_sources(documents,rows=None):
     from .fingerstyle_translation import PitchSource
     sources={role:doc.pitch_source(rows,True,TRACK_NAMES[role]) for role,doc in documents.items()}
-    if not clock_matches(documents['recorded'],documents['live']):raise ValueError('两轨速度或拍号不一致，请先统一 BPM 与拍号，再合成或编配')
-    basis=sources['recorded'].score;events=[];strums={};tones={};hints=[];lead=set()
-    for role,source in sources.items():
+    basis=sources['recorded'].score
+    if not _score_clocks_match(basis,sources['live'].score):raise ValueError('两轨速度或拍号不一致，请先统一 BPM 与拍号，再合成或编配')
+    events=[];strums={};tones={};hints=[];lead=set();targets={};lane_timbres=[]
+    for role in ROLES:
+        source=sources[role]
         points=timbre_points(source.score)
+        lane_timbres.append(points)
+        sweep_times=dict(source.sweeps)
         for event in source.score.events:
             if not event.notes:continue
             events.append(replace(event,label=role))
             tones[event.start,role]=next(tone for at,tone in reversed(points) if at<=event.start)
+            if event.start in sweep_times:targets.setdefault(event.start,set()).update(event.notes)
             if role=='live':lead.update((event.start,p) for p in event.notes)
         strums.update({(at,role):direction for at,direction in source.sweeps});hints.extend(source.note_hints)
     score=replace(basis,events=tuple(sorted(events,key=lambda e:e.start)),beats=max(s.score.beats for s in sources.values()))
-    source=PitchSource(score,'双轨原谱',sweeps=tuple((at,direction) for (at,_),direction in strums.items()),note_hints=tuple(hints))
+    explicit=set()
+    for item in sources.values():
+        optional_times=set(item.optional_sweeps)
+        explicit.update(at for at,_ in item.sweeps if at not in optional_times)
+    optional=tuple(sorted({at for source in sources.values() for at in source.optional_sweeps}-explicit))
+    source=PitchSource(score,'双轨原谱',sweeps=tuple((at,direction) for (at,_),direction in strums.items()),note_hints=tuple(hints),
+                       optional_sweeps=optional,sweep_targets=tuple((at,tuple(sorted(pitches))) for at,pitches in sorted(targets.items())),
+                       lane_timbres=tuple(lane_timbres),lane_sweeps=tuple(strums.items()),
+                       lane_sources=tuple((role,sources[role]) for role in ROLES))
     return source,{'pitch_events':True,'strums':strums,'event_timbres':tones},lead
 
 

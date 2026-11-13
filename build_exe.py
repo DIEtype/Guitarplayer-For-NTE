@@ -57,6 +57,8 @@ def build():
         archive.write(root/'assets'/'icon-source.md','assets/icon-source.md')
         gamepad_license=root/'assets/gamepad/ViGEmClient-LICENSE.txt'
         if gamepad_license.is_file():archive.write(gamepad_license,'assets/gamepad/ViGEmClient-LICENSE.txt')
+        for path in sorted((root/'assets/guitar-pro').glob('*LICENSE.txt')):
+            archive.write(path, path.relative_to(root))
         for path in sorted(licenses.iterdir()):archive.write(path,Path('licenses')/path.name)
         for folder in ('examples','vendor/mido-1.3.3.dist-info','vendor/packaging-26.3.dist-info/licenses'):
             for path in sorted((root/folder).rglob('*')):

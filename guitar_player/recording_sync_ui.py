@@ -284,12 +284,14 @@ class RecordingSyncDialog(tk.Toplevel):
 
     def open_composition(self,path=None):
         if self.app.busy:self.feedback.set('请先停止演奏，再打开双轨原谱。');return
-        path=path or filedialog.askopenfilename(parent=self,title='打开双轨原谱',filetypes=[('双轨原谱','*.gscore')])
+        from .guitar_pro import EXTENSIONS, FILE_FILTER
+        path=path or filedialog.askopenfilename(parent=self,title='打开双轨原谱',filetypes=[('曲谱',f'*.gscore {FILE_FILTER[1]}'),('双轨原谱','*.gscore'),FILE_FILTER])
         if not path:return
+        candidate_path=Path(path)
+        if candidate_path.suffix.lower() in EXTENSIONS:return self.app.import_guitar_pro(candidate_path,owner=self)
         try:
             from .duet_composition import read_composition
             import json
-            candidate_path=Path(path)
             if candidate_path.stat().st_size>20_000_000:raise ValueError('合奏原谱超过 20 MB，请先分段')
             data=json.loads(candidate_path.read_text(encoding='utf-8-sig'))
             if isinstance(data,dict) and data.get('kind')=='duet_session':

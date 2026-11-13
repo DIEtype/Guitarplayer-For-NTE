@@ -18,6 +18,8 @@ def compile_document(document,rows=None):
     written strings; no substitute chord or alternate fingering is searched.
     Timing feasibility belongs to the planner and never blocks score loading.
     """
+    if document.tuning != tuple(STANDARD_TUNING.values()):
+        raise ValueError('原谱使用非标准定弦，游戏需按实际音高重新选指法。请使用“近似转译”')
     doc,_=materialize_repeats(document);score=doc.score()
     cells=defaultdict(deque);events=[];labels=[]
     for cell in doc.cells:cells[cell.start].append(cell)

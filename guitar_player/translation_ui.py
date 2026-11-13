@@ -142,6 +142,8 @@ class TranslationWindow(tk.Toplevel):
         actions=ttk.Frame(frame);actions.pack(side='bottom',fill='x',pady=(10,0),before=self.comparison_tabs)
         self.apply_button=ttk.Button(actions,text='应用为演奏谱，再打开编曲',command=self.apply,state='disabled')
         self.apply_button.pack(side='right')
+        self.solo_button=ttk.Button(actions,text='5 秒后演奏此轨',command=self.play_result,state='disabled',style='Workspace.Compose.TButton')
+        self.solo_button.pack(side='right',padx=(8,6))
         ttk.Button(actions,text='保存转换／失败报告',command=self.save_report).pack(side='right',padx=8)
         ttk.Button(actions,text='试听原谱',command=lambda:self.audition(False)).pack(side='left')
         ttk.Button(actions,text='试听转译',command=lambda:self.audition(True)).pack(side='left',padx=6)
@@ -158,6 +160,7 @@ class TranslationWindow(tk.Toplevel):
         if self.table_timer is not None:self.after_cancel(self.table_timer);self.table_timer=None
         if self.voice_timer is not None:self.after_cancel(self.voice_timer);self.voice_timer=None
         self.apply_button.configure(state='disabled')
+        self.solo_button.configure(state='disabled')
         self.tree.delete(*self.tree.get_children())
         self.ornament_tree.delete(*self.ornament_tree.get_children())
         self.feedback.set('设置已更改，请重新生成转译预览。')
@@ -235,7 +238,7 @@ class TranslationWindow(tk.Toplevel):
             profile=copy.deepcopy(self.parent.profiles['混合模式'])
             profile.initial_mode='chord' if self.parent.game_mode.get()=='和弦' else 'fret'
             profile.initial_timbre=next(k for k,v in TONE_NAMES.items() if v==self.parent.game_timbre.get())
-            if self.parent.profile.mode!='mixed':profile.initial_pages[profile.initial_mode]=int(self.parent.page.get())-1
+            profile.initial_pages[profile.initial_mode]=int(self.parent.page.get())-1
             args=(self.source,copy.deepcopy(self.rows),profile,self.parent.input_timing,int(self.parent.tap.get())/1000)
             kwargs={'reference':self.basis.get().startswith('无 Capo'),'octaves':self.octaves.get(),
                     'avoid_bm_second':self.avoid_bm_second.get(),
@@ -323,6 +326,7 @@ class TranslationWindow(tk.Toplevel):
             comparison=f'；原调→当前：省略 {omitted_count(original)}→{omitted_count(report)} 音，切模式 {original["mode_switches"]}→{report["mode_switches"]} 次，翻页 {original["page_moves"]}→{report["page_moves"]} 次'
         self.key_summary.set('当前：'+transpose_name(report['transpose_semitones'])+comparison)
         self.feedback.set(report['summary']);self.apply_button.configure(state='normal')
+        self.solo_button.configure(state='normal')
 
     def fill_key_rows(self,selected_shift=None):
         self.keys.delete(*self.keys.get_children())
@@ -354,8 +358,11 @@ class TranslationWindow(tk.Toplevel):
         profile=self.parent.profile
         if row['action'] in ('up','down'):
             up=row['action']=='up'
-            return ('右摇杆↑' if up else '右摇杆↓') if profile.strum_input=='gamepad' else ('鼠标左键' if up else '鼠标右键')
-        return '+'.join(str(profile.bindings[string].key) for string in row['strings'])
+            action=('右摇杆↑' if up else '右摇杆↓') if profile.strum_input=='gamepad' else ('鼠标左键' if up else '鼠标右键')
+        else:
+            action='+'.join(str(profile.bindings[string].key) for string in row['strings'])
+        approximation=row.get('strum_approximation')
+        return f'{action} · {approximation}' if approximation in ('改为拨弦','保留方向，替换内声部') else action
 
     def show_voice_review(self,rows):
         if self.voice_timer is not None:self.after_cancel(self.voice_timer);self.voice_timer=None
@@ -491,6 +498,12 @@ class TranslationWindow(tk.Toplevel):
         if self.table_timer is not None:self.after_cancel(self.table_timer);self.table_timer=None
         if self.voice_timer is not None:self.after_cancel(self.voice_timer);self.voice_timer=None
         self.cancel_search();self.stop_audio();super().destroy()
+
+    def play_result(self):
+        if self.result is None:return
+        from .duet_project import DuetPart
+        self.stop_audio()
+        self.parent.start_solo(DuetPart(self.source.name,self.result),self.feedback)
 
     def apply(self):
         if self.result is None:return

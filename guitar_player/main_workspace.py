@@ -24,6 +24,7 @@ def build(app):
 
     app.source_actions=ttk.Frame(app,padding=(20,0,20,10));app.source_actions.pack(fill='x')
     app.import_button=ttk.Button(app.source_actions,text='导入 MIDI',style='Workspace.Source.TButton',command=app.import_midi)
+    app.guitar_pro_button=ttk.Button(app.source_actions,text='导入 Guitar Pro',style='Workspace.Source.TButton',command=app.import_guitar_pro)
     app.library_button=ttk.Button(app.source_actions,text='我的曲库',style='Workspace.Source.TButton',command=app.open_library)
     app.compose_button=ttk.Button(app.source_actions,text='手动编谱',style='Workspace.Compose.TButton',command=app.open_visual_editor)
     app.source_editor_button=app.compose_button
@@ -39,7 +40,7 @@ def build(app):
     app.score_menu.add_command(label='恢复上次编谱草稿…',command=app.open_fingerstyle_editor)
     app.score_menu.add_command(label='文本谱语法…',command=lambda:app.open_guide('text'))
     app.score_menu.add_command(label='完整使用说明…',command=app.open_guide)
-    app.source_buttons=(app.import_button,app.library_button,app.compose_button,app.open_button,app.save_button,app.score_tools)
+    app.source_buttons=(app.import_button,app.guitar_pro_button,app.library_button,app.compose_button,app.open_button,app.save_button,app.score_tools)
     app._source_compact=None
     app._build_playback_bar()
 
@@ -152,13 +153,13 @@ def layout(app,event=None):
             app.timeline.pack(fill='x',pady=(4,0),before=app.status_banner)
             app.preparation_hint.pack(anchor='w',pady=(0,7),before=app.game_summary_label)
             app.mapping_hint.pack(side='bottom',anchor='w',pady=5,after=app.game_summary_label)
-    source_compact=width<900
+    source_compact=width<950
     if source_compact!=app._source_compact:
         app._source_compact=source_compact
         for button in app.source_buttons:button.grid_forget()
-        for i in range(6):app.source_actions.columnconfigure(i,weight=0)
+        for i in range(len(app.source_buttons)):app.source_actions.columnconfigure(i,weight=0)
         for i,button in enumerate(app.source_buttons):
-            row,column=divmod(i,3) if source_compact else (0,i)
+            row,column=divmod(i,4) if source_compact else (0,i)
             button.grid(row=row,column=column,sticky='ew',padx=(0,7),pady=(0,5 if source_compact and row==0 else 0))
             app.source_actions.columnconfigure(column,weight=1)
     connection_compact=width<1080

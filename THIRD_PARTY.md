@@ -7,8 +7,12 @@
 | Mido | 1.3.3 | MIT | `vendor/mido-1.3.3.dist-info/LICENSE` |
 | packaging | 26.3 | Apache-2.0 或 BSD-2-Clause | `vendor/packaging-26.3.dist-info/licenses/LICENSE`、`LICENSE.APACHE`、`LICENSE.BSD` |
 | ViGEmClient | DLL 1.0.0.1（vgamepad 0.1.0 分发） | MIT | `assets/gamepad/ViGEmClient-LICENSE.txt` |
+| alphaTab | 1.8.2 | MPL-2.0 | `assets/guitar-pro/alphaTab-LICENSE.txt` |
+| QuickJS-NG 与 Python 封装 | 0.18.0 / 0.18.0.1 | MIT | `assets/guitar-pro/QuickJS-LICENSE.txt`、`assets/guitar-pro/quickjs-ng-python-LICENSE.txt` |
 
 完整许可与版权声明保留在上述文件中。Mido 用于读取 MIDI；packaging 是其版本处理依赖。本程序的 MIDI 读取不使用 MIDI 设备后端。
+
+Guitar Pro 导入使用原版 alphaTab 分发文件，源码见 [alphaTab v1.8.2](https://github.com/CoderLine/alphaTab/tree/v1.8.2)。Windows x64 的 `_quickjs.pyd` 来自 [quickjs-ng 0.18.0.1 官方 wheel](https://pypi.org/project/quickjs-ng/0.18.0.1/)。Guitar Pro 导入时才加载这两个组件。
 
 ViGEmClient 用于可选的虚拟 Xbox 输入，包括右摇杆扫弦、左摇杆选择圆盘、拨弦按钮与 LB／RB 翻页。客户端来源为 [vgamepad 0.1.0 官方发布包](https://pypi.org/project/vgamepad/0.1.0/)，上游为 [nefarius/ViGEmClient](https://github.com/nefarius/ViGEmClient)。程序未运行 vgamepad 的安装脚本，也不包含其驱动安装器。使用虚拟手柄输入需另行安装 [ViGEmBus v1.22.0](https://github.com/nefarius/ViGEmBus/releases/tag/v1.22.0)。ViGEm 项目已停止维护，此功能作为可选方式保留，键盘与鼠标输入不依赖该驱动。
 

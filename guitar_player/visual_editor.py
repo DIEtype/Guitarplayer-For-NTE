@@ -223,10 +223,12 @@ class VisualTabEditor(tk.Toplevel):
         try:
             bpm=float(self.bpm.get());num=int(self.numerator.get());den=int(self.denominator.get());capo=int(self.capo.get())
             if not 20<=bpm<=360:raise ValueError('速度应为 20～360 BPM')
+            timbre=next(key for key,label in TONE_NAMES.items() if label==self.timbre.get())
+            if (bpm,(num,den),capo,timbre)==(self.doc.bpm,self.doc.meter,self.doc.capo,self.doc.default_timbre):return True
             def change():
                 self.doc.set_capo(capo)
                 self.doc.set_meter(num,den);self.doc.bpm=bpm
-                self.doc.default_timbre=next(key for key,label in TONE_NAMES.items() if label==self.timbre.get())
+                self.doc.default_timbre=timbre
             return self.edit(change)
         except ValueError as error:self.feedback.set(str(error));return False
 
@@ -264,20 +266,24 @@ class VisualTabEditor(tk.Toplevel):
 
     def click(self,event):
         x=event.x;y=self.canvas.canvasy(event.y)
-        for index,(left,top,width) in enumerate(self.bar_boxes):
-            if not (left<=x<=left+width and top<=y<=top+252):continue
-            first=left+58;span=width-78
-            measure=self.doc.bar(index)
-            local=max(0,min(1,(x-first)/span))*float(measure.beats)
-            grid=min(GRIDS[self.grid_name.get()],measure.beats)
-            beat=min(measure.beats-grid,max(F(0),round(local/float(grid))*grid))
-            at=measure.start+beat
-            candidates=[c for c in self.doc.cells if c.start<measure.end and c.end>measure.start]
-            near=min(candidates,key=lambda c:abs(first+float(max(c.start,measure.start)-measure.start)/float(measure.beats)*span-x),default=None)
-            if near and abs(first+float(max(near.start,measure.start)-measure.start)/float(measure.beats)*span-x)<13:at=near.start
-            string=max(1,min(6,round((y-top-55)/22)+1))
-            if near and y>top+177:string=near.string
-            self.select_cursor(at,string);self.canvas.focus_set();return
+        for index in self.visible_bars:
+            left,top,width=self.bar_boxes[index]
+            if left<=x<=left+width and top<=y<=top+252:
+                self.click_bar(index,(left,top,width),x,y,getattr(event,'state',0));return
+
+    def click_bar(self,index,box,x,y,state):
+        left,top,width=box;first=left+58;span=width-78
+        measure=self.doc.bar(index)
+        local=max(0,min(1,(x-first)/span))*float(measure.beats)
+        grid=min(GRIDS[self.grid_name.get()],measure.beats)
+        beat=min(measure.beats-grid,max(F(0),round(local/float(grid))*grid))
+        at=measure.start+beat
+        def distance(cell):return abs(first+float(max(cell.start,measure.start)-measure.start)/float(measure.beats)*span-x)
+        near=min(self.draw_cells.between(measure.start,measure.end),key=distance,default=None)
+        if near and distance(near)<13:at=near.start
+        string=max(1,min(6,round((y-top-55)/22)+1))
+        if near and y>top+177:string=near.string
+        self.select_cursor(at,string);self.canvas.focus_set()
 
     def key(self,event):
         char=event.char
@@ -467,7 +473,8 @@ class VisualTabEditor(tk.Toplevel):
             self.select_cursor(self.doc.bar(min(index,self.doc.bars-1)).start)
 
     def refresh(self):
-        self.dot_var.set(self.dotted);self.triplet_var.set(self.triplet)
+        if self.dot_var.get()!=self.dotted:self.dot_var.set(self.dotted)
+        if self.triplet_var.get()!=self.triplet:self.triplet_var.set(self.triplet)
         if getattr(self,'_palette_value',None)!=self.value:
             for value,canvas in self.music_buttons.items():
                 canvas.delete('all');canvas.configure(bg=TINT if value==self.value else PAPER,
@@ -475,12 +482,16 @@ class VisualTabEditor(tk.Toplevel):
                 music_symbol(canvas,24,32,value)
                 canvas.create_text(27,49,text=NAMES[value],fill=INK,font=('Microsoft YaHei UI',8))
             self._palette_value=self.value
-        self.summary.set(f'{self.doc.bars} 小节   ·   默认 {self.doc.bpm:g} BPM')
+        summary=f'{self.doc.bars} 小节   ·   默认 {self.doc.bpm:g} BPM'
+        if self.summary.get()!=summary:self.summary.set(summary)
         cell=self.doc.at(self.at)
         note='休止符' if cell and cell.fret is None else f'{cell.fret} 品' if cell else '空位，输入数字即可写入'
         if cell and identify_duration(cell.beats) is None:note+=f'（特殊时值 {cell.beats} 拍，点音符图形可重设）'
-        self.feedback.set(f'第 {self.doc.bar_index(self.at)+1} 小节  ·  {self.string} 弦  ·  {note}    |    右键设置小节，V 标记切换音色；← → 移音位')
+        self.cursor_feedback(cell,note)
         self.draw()
+
+    def cursor_feedback(self,cell,note):
+        self.feedback.set(f'第 {self.doc.bar_index(self.at)+1} 小节 · {self.string} 弦 · {note}  |  右键设置小节，V 切换音色，← → 移音位')
 
     def reveal_cursor(self):
         index=self.doc.bar_index(self.at)
@@ -497,14 +508,18 @@ class VisualTabEditor(tk.Toplevel):
         if not hasattr(self,'canvas') or self.closed:return
         from .score_view import score_view
         c=self.canvas;view=score_view(self,self.doc)
-        width=max(780,width or c.winfo_width());columns=2 if width>=960 else 1
-        key=(view.state,width,getattr(self,'bar_selection',None))
+        width=max(420,width or c.winfo_width());columns=max(1,min(3,width//450))
+        selection=getattr(self,'bar_selection',None)
+        key=(view,width,selection)
         if getattr(self,'_render_key',None)==key:
             self.draw_cursor();return
-        self._render_key=key;c.delete('all');self.visible_bars=set()
-        measure_width=(width-40-(columns-1)*24)/columns
-        self.bar_boxes=[(20+(i%columns)*(measure_width+24),20+(i//columns)*274,measure_width) for i in range(self.doc.bars)]
-        height=40+math.ceil(self.doc.bars/columns)*274;c.configure(scrollregion=(0,0,width,height))
+        self._render_key=key
+        geometry=(width,self.doc.bars)
+        if getattr(self,'_bar_geometry',None)!=geometry:
+            self._bar_geometry=geometry;c.delete('all');self.visible_bars=set();self._bar_render_keys={}
+            measure_width=(width-40-(columns-1)*24)/columns
+            self.bar_boxes=[(20+(i%columns)*(measure_width+24),20+(i//columns)*274,measure_width) for i in range(self.doc.bars)]
+            height=40+math.ceil(self.doc.bars/columns)*274;c.configure(scrollregion=(0,0,width,height))
         self.draw_score=view.score;self.draw_tempos=view.tempos;self.draw_cells=view
         self.draw_columns=columns
         self.draw_visible()
@@ -514,18 +529,23 @@ class VisualTabEditor(tk.Toplevel):
         """Keep only the viewport and one neighboring row on the Tk canvas."""
         self.visible_id=None
         if self.closed or not self.bar_boxes:return
-        if self.doc.bars<=32:
+        if self.doc.bars<=8:
             wanted=set(range(self.doc.bars))
         else:
             top=max(0,self.canvas.canvasy(0));height=max(300,self.canvas.winfo_height())
             first=max(0,int((top-20)//274)-1)*self.draw_columns
             last=min(self.doc.bars,(int((top+height-20)//274)+2)*self.draw_columns)
             wanted=set(range(first,last))
-        for index in self.visible_bars-wanted:self.canvas.delete(f'bar_{index}')
-        for index in sorted(wanted-self.visible_bars):
-            before=set(self.canvas.find_all())
+        keys=getattr(self,'_bar_render_keys',None)
+        selection=getattr(self,'bar_selection',None)
+        current={index:self.draw_cells.bar_key(self.doc,index,selection) for index in wanted} if keys is not None else {}
+        dirty={index for index,key in current.items() if keys.get(index)!=key}
+        for index in (self.visible_bars-wanted)|(self.visible_bars&dirty):self.canvas.delete(f'bar_{index}')
+        for index in sorted((wanted-self.visible_bars)|dirty):
+            before=len(self.canvas.find_all())
             self.draw_bar(index,*self.bar_boxes[index])
-            for item in set(self.canvas.find_all())-before:self.canvas.addtag_withtag(f'bar_{index}',item)
+            for item in self.canvas.find_all()[before:]:self.canvas.addtag_withtag(f'bar_{index}',item)
+        if keys is not None:self._bar_render_keys=current
         self.visible_bars=wanted
         self.canvas.tag_raise('playhead')
         if hasattr(self,'draw_cursor'):self.draw_cursor()
@@ -565,7 +585,14 @@ class VisualTabEditor(tk.Toplevel):
         if marks:c.create_text(mark_x,top+13,text='   '.join(marks),anchor='w',fill=FOCUS,font=('Microsoft YaHei UI',10,'bold'),tags='measure_mark')
         for beat in range(1,math.ceil(measure.beats)):
             x=px(start+beat);c.create_line(x,top+42,x,top+174,fill='#edf2f5',dash=(2,5))
-        for string,label in enumerate(('e','B','G','D','A','E'),1):
+        labels = ('e','B','G','D','A','E')
+        tuning = getattr(self.doc, 'tuning', None)
+        if tuning is not None:
+            from .music import STANDARD_TUNING
+            from .score import NAMES
+            if tuning != tuple(STANDARD_TUNING.values()):
+                labels = tuple(NAMES[pitch % 12] for pitch in tuning)
+        for string,label in enumerate(labels,1):
             y=top+55+(string-1)*22
             c.create_text(left+20,y,text=label,fill=MUTED,font=('Consolas',11))
             c.create_line(left+43,y,left+width-8,y,fill=LINE)
@@ -707,8 +734,9 @@ class VisualTabEditor(tk.Toplevel):
         except ValueError as error:self.feedback.set(str(error))
 
     def stop_preview(self):
+        active=self.preparing or self.player.running or self.play_at is not None
         self.audio_cancel.set();self.preparing=False;self.player.stop();self.play_at=None
-        if hasattr(self,'canvas') and not self.closed:
+        if active and hasattr(self,'canvas') and not self.closed:
             self.canvas.delete('playhead');self.preview_button.configure(text='▶ 本小节试听 Space')
 
     def _poll(self):

@@ -6,10 +6,10 @@ from fractions import Fraction as F
 from functools import lru_cache
 from pathlib import Path
 
-from .fingerstyle_translation import PitchSource,Choice,_match,from_midi,transpose_source
+from .fingerstyle_translation import PitchSource,Choice,_match,from_midi,sweep_choice,translate,transpose_source
 from .game_profile import GameProfile,ROMAN
-from .guitar import GuitarEvent,make_plan,split_long_rests,event_position
-from .measures import timbre_points
+from .guitar import DOWN,UP,GuitarEvent,make_plan,split_long_rests,event_position
+from .measures import MeasureChange, timbre_points
 from .music import fret_pitch,positions_for_pitch,pitch_range_hint
 from .score import pitch_name
 from .timing import ADAPTIVE,selector_timing,transition_interval,pointer_free,input_resource
@@ -17,6 +17,7 @@ from .voice_roles import analyze_roles,ROLE_NAMES
 from .voicings import available_voicings
 
 STRATEGIES={'roles':'伴奏＋主旋律','playable':'可演奏优先'}
+KEEP_TRACKS='保留原轨与音色'
 
 
 def midi_source(midi,track_indices,melody_track=None):
@@ -120,6 +121,88 @@ def _merge_onsets(source):
     return replace(source,score=replace(source.score,events=tuple(events)),note_hints=tuple(hints))
 
 
+def arrange_original_tracks(source,rows,profile,timing,tap,*,transpose=0,preroll_bars=2,
+                            protected_keys=(),cancel=None,progress=None,sustain_notes=True):
+    """Approximate each authored track using only that track's notes and tone."""
+    if not source.lane_sources:raise ValueError('请从双轨编谱打开“自动编配双轨…”，以保留 Guitar Pro 的原始轨道和音色')
+    if type(preroll_bars) is not int or not 1<=preroll_bars<=8:raise ValueError('共同前奏应为 1～8 小节')
+    clock=source.score
+    lead=F(clock.time_signature[0]*4,clock.time_signature[1])*preroll_bars
+    end=clock.beats+lead;preroll_seconds=_shift_clock(clock,lead,preroll_bars).seconds_at(lead)
+    if end>100000:raise ValueError('加入共同前奏后超过 100000 拍，请先分段编配')
+    scores={};pitched={};sweeps={};details=[];summaries=[];clock_error=0.0
+    keys=set(protected_keys)
+    total=len(source.lane_sources)
+    for index,(role,lane) in enumerate(source.lane_sources):
+        if cancel is not None and cancel.is_set():raise InterruptedError('已取消编配')
+        scores[role]=pitched[role]=None;sweeps[role]={}
+        if not any(event.notes for event in lane.score.events):continue
+        lane=_merge_onsets(lane)
+        overrides=tuple((e.start,p,'keep') for e in lane.score.events for p in set(e.notes) if (role,e.start,p) in keys)
+        def report_progress(done,count):
+            if progress:progress(index*100+done*100//max(1,count),total*100)
+        try:
+            arranged,report=translate(lane,rows,profile,timing,tap,transpose=transpose,
+                                      cancel=cancel,progress=report_progress,sustain_notes=sustain_notes,
+                                      analyze_voices=True,voice_overrides=overrides)
+            if report['timing_warning']:raise ValueError(report['timing_warning'])
+            # Prepend identical silence for recording sync. The separate tone
+            # maps travel with their own parts, including changes inside the song.
+            shifted=_shift_clock(arranged,lead,preroll_bars);origin=shifted.seconds_at(lead)
+            clock_error=max(clock_error,abs(origin-preroll_seconds))
+            rest=GuitarEvent((),F(0),lead,'Zero','休止',1)
+            attacks={F(row['beat']):row for row in report['events']}
+            note_ends={}
+            for hint in lane.note_hints:
+                key=hint.start,hint.pitch+transpose
+                note_ends[key]=max(hint.end,note_ends.get(key,hint.end))
+            game=[rest];audio=[rest]
+            for event in arranged.events:
+                row=attacks.get(event.start) if event.notes else None
+                shifted_event=replace(event,start=event.start+lead)
+                if row is None:
+                    game.append(shifted_event);audio.append(shifted_event);continue
+                pitches=row['pitches']
+                if row['action']!='pick':sweeps[role][shifted_event.start,role]=UP if row['action']=='up' else DOWN
+                groups={}
+                if row['action']!='pick' or not sustain_notes:
+                    groups[event.beats]=(event.notes,pitches)
+                else:
+                    for string,pitch in zip(event.notes,pitches):
+                        beats=note_ends.get((event.start,pitch),event.start+event.beats)-event.start
+                        strings,group=groups.setdefault(beats,([],[]));strings.append(string);group.append(pitch)
+                for beats,(strings,group) in groups.items():
+                    game.append(replace(shifted_event,notes=tuple(strings),beats=beats))
+                    audio.append(replace(shifted_event,notes=tuple(group),beats=beats,label=role))
+                for pitch in row['source']:
+                    kept=pitch+transpose in pitches
+                    reason=row.get('strum_approximation','原起拍与音高保留') if kept else '原轨按法／时序近似省略'
+                    details.append({'beat':row['beat'],'original_pitch':pitch,'output_pitch':pitch+transpose,
+                                    'output_beat':str(shifted_event.start),'role':'melody' if pitch+transpose in row['protected_pitches'] else 'inner',
+                                    'part':role if kept else 'omitted','source_part':role,'selector':row['selector'] if kept else '',
+                                    'reason':lane.name+' · '+reason})
+                clock_error=max(clock_error,abs(shifted.seconds_at(shifted_event.start)-origin-clock.seconds_at(event.start)))
+            score=replace(shifted,events=split_long_rests(game),beats=end)
+            plan=make_plan(score,part_profile(profile,score),timing=timing,tap=tap,sustain_notes=sustain_notes)
+            first=min(step.at for step in plan if step.kind in ('page','chord_move','mode_down','timbre_down') or step.kind=='note' and step.data[1])
+            if first<.25:raise ValueError('共同前奏太短，请增加共同前奏小节数')
+        except ValueError as error:
+            raise ValueError(f'{lane.name}：{error}。可单独调整该轨，或改用“可演奏优先”允许跨轨分配。') from error
+        scores[role]=score;pitched[role]=replace(score,events=split_long_rests(audio));summaries.append(f'{lane.name} · {report["summary"]}')
+    if not summaries:raise ValueError('两轨均没有可演奏的音符')
+    if clock_error>1e-7:raise ValueError(f'原轨编配时间轴校验未通过，最大起拍误差 {clock_error*1000:.3f} ms')
+    details.sort(key=lambda row:F(row['beat']))
+    omitted=sum(row['part']=='omitted' for row in details)
+    report={'version':1,'strategy':'original_tracks','source':source.name,'timing':timing.label,'transpose':transpose,
+            'preroll_bars':preroll_bars,'preroll_beats':str(lead),'notes':details,'input_notes':len(details),
+            'kept_notes':len(details)-omitted,'omitted_notes':omitted,'melody_to_recorded':0,
+            'summary':KEEP_TRACKS+'。'+'。'.join(summaries),
+            'clock_check':{'max_onset_error_ms':clock_error*1000,'common_preroll_seconds':preroll_seconds,
+                           'policy':'独立编配，保持原轨、原音色和原起拍；两轨增加相同前奏'}}
+    if progress:progress(total*100,total*100)
+    return SplitResult(scores,pitched,sweeps,report)
+
+
 def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='roles',melody_keys=(),protected_keys=(),
                  transpose=0,preroll_bars=2,beam=12,cancel=None,progress=None,sustain_notes=True):
     if strategy not in STRATEGIES:raise ValueError('请选择伴奏＋主旋律或可演奏优先')
@@ -145,10 +228,12 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
         if key in manual:row.update(role='keep',basis='手动指定此拍主旋律',strength='指定')
         elif key[0] in manual_times and key not in marked and row['role'] in ('melody','uncertain'):
             row.update(role='inner',basis='此拍已另行指定旋律',strength='指定')
-    protected=dict(source.protected_marks);sweeps=dict(source.sweeps)
+    protected=dict(source.protected_marks);sweeps=dict(source.sweeps);optional_sweeps=set(source.optional_sweeps)
+    sweep_targets=dict(source.sweep_targets)
     profile=copy.deepcopy(profile or GameProfile.mixed());timing=selector_timing(timing or ADAPTIVE,profile)
     resources={s:input_resource(s,profile) for s in (*range(1,7),101,102)}
-    points=timbre_points(clock);tone_starts=[at for at,_ in points]
+    lane_timbres=source.lane_timbres or (timbre_points(clock),)*2
+    tone_starts=tuple(tuple(at for at,_ in points) for points in lane_timbres)
     tables={tone:available_voicings(rows or {},tone,True) for tone in ('clean','distorted')}
     fret_tables={f:tuple(fret_pitch(s,f) for s in range(1,7)) for f in range(25)}
 
@@ -171,8 +256,9 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
         return tuple(found.values())
 
     @lru_cache(maxsize=512)
-    def pairs(wanted,main,bass,tone,sweep):
+    def pairs(wanted,main,bass,tones,sweep,approximate=False,target=()):
         w=set(wanted);m=set(main);b=set(bass);found={}
+        recorded_tone,live_tone=tones
         def add(recorded,live):
             rp=set(recorded.pitches) if recorded else set();lp=set(live.pitches) if live else set()
             if rp&lp or not m.issubset(rp|lp):return
@@ -180,25 +266,37 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
             role_cost=len(m-lp)*10+len(b&lp)*3+len(lp-m-b)
             key=(recorded,live);found[key]=(recorded,live,loss,role_cost)
         if sweep:
-            for option in choices(wanted,wanted,tone,sweep):add(option,None);add(None,option)
+            target=target or wanted
+            for lane,tone in enumerate(tones):
+                strums=list(choices(target,target,tone,sweep))
+                if approximate:
+                    for item in tables[tone].values():
+                        option=sweep_choice(set(target),m.intersection(target),item,sweep,True)
+                        if option and option.omitted:strums.append(option)
+                for option in strums:
+                    remain=tuple(sorted(w-set(option.pitches)))
+                    fallback_picks=choices(remain,tuple(sorted(m-set(option.pitches))),tones[1-lane])
+                    for picked in (None,*fallback_picks):
+                        if lane==0:add(option,picked)
+                        else:add(picked,option)
             # Prefer a real strum, but retain exact-pitch two-lane picking as
             # an explicitly reported fallback for unavailable or late strums.
-            fallback=pairs(wanted,main,bass,tone,0)
+            fallback=pairs(wanted,main,bass,tones,0)
             return tuple(sorted((*found.values(),*((a,b,loss,role+20) for a,b,loss,role in fallback)),key=lambda p:(p[2],p[3])))
         else:
             live_targets={wanted,tuple(sorted(m)) if m else (max(w),)}
             for target in live_targets:
-                for live in choices(target,tuple(sorted(m)),tone):
+                for live in choices(target,tuple(sorted(m)),live_tone):
                     remain=tuple(sorted(w-set(live.pitches)))
                     if remain:
-                        for recorded in choices(remain,tuple(sorted(m-set(live.pitches))),tone):add(recorded,live)
+                        for recorded in choices(remain,tuple(sorted(m-set(live.pitches))),recorded_tone):add(recorded,live)
                     add(None,live)
             recorded_targets={wanted,(min(w),)}
             for target in recorded_targets:
-                for recorded in choices(target,(),tone):
+                for recorded in choices(target,(),recorded_tone):
                     remain=tuple(sorted(w-set(recorded.pitches)))
                     if remain:
-                        for live in choices(remain,tuple(sorted(m-set(recorded.pitches))),tone):add(recorded,live)
+                        for live in choices(remain,tuple(sorted(m-set(recorded.pitches))),live_tone):add(recorded,live)
                     add(recorded,None)
             if not m:add(None,None)
         ordered=sorted(found.values(),key=lambda item:(item[2],item[3]))
@@ -227,22 +325,50 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
                  page if choice.mode=='fret' else state.fret_page,tone,at,choice.action,tuple(sorted(attacks.items(),key=lambda x:str(x[0]))))
         return new,switch*10+moves*2+select*.3+tone_change
 
-    initial=Lane(profile.initial_mode or 'fret',None,profile.initial_pages['chord'],profile.initial_pages['fret'],profile.initial_timbre)
-    nodes=[Node((initial,initial),(0,0.0,0.0))];descriptions=[]
-    for index,event in enumerate(events):
+    descriptions=[]
+    for event in events:
         if cancel is not None and cancel.is_set():raise InterruptedError('已取消自动拆分')
-        if progress and index%16==0:progress(index,len(events))
-        wanted=tuple(sorted(set(event.notes)));tone=points[max(0,bisect_right(tone_starts,event.start)-1)][1]
+        wanted=tuple(sorted(set(event.notes)))
+        tones=tuple(points[max(0,bisect_right(starts,event.start)-1)][1] for points,starts in zip(lane_timbres,tone_starts))
         event_rows=[role_rows[event.start,p] for p in wanted]
         main={r['pitch'] for r in event_rows if r['role'] in ('melody','keep','uncertain')}
         main.update(protected.get(event.start,()))
-        if event.start in sweeps and not marked and not protected.get(event.start) and not any((event.start,p) in manual for p in main):main=set()
+        strummed=set(sweep_targets.get(event.start,()))
+        if event.start in sweeps and not marked and not protected.get(event.start):
+            manually_protected={p for p in main if (event.start,p) in manual}
+            if strummed:
+                main=manually_protected | (main-strummed)
+            elif not manually_protected:
+                main=set()
         bass={r['pitch'] for r in event_rows if r['role']=='bass'}
-        options=pairs(wanted,tuple(sorted(main)),tuple(sorted(bass)),tone,sweeps.get(event.start,0))
+        descriptions.append((event,main,bass,event_rows,tones))
+
+    # A playable accompaniment now can leave both lanes busy at the next
+    # melody attack. Before trimming the beam, reserve routes for that note.
+    following_melody=[None]*len(descriptions)
+    upcoming=None
+    for index in range(len(descriptions)-1,-1,-1):
+        following_melody[index]=upcoming
+        event,main,_,_,tones=descriptions[index]
+        if main:
+            upcoming=(clock.seconds_at(event.start),tones,tuple(sorted(main)))
+    # Both page wheels take at most two steps via the shortest route.
+    preparation_window=(.27+2*timing.jitter_margin+2*timing.page_delay+
+                        timing.selection_budget()+tap+timing.key_gap)
+
+    initial=Lane(profile.initial_mode or 'fret',None,profile.initial_pages['chord'],profile.initial_pages['fret'],profile.initial_timbre)
+    nodes=[Node((initial,initial),(0,0.0,0.0))]
+    original_at={event.start:event for event in original.score.events}
+    for index,(event,main,bass,event_rows,tones) in enumerate(descriptions):
+        if cancel is not None and cancel.is_set():raise InterruptedError('已取消自动拆分')
+        if progress and index%16==0:progress(index,len(events))
+        wanted=tuple(sorted(set(event.notes)))
+        options=pairs(wanted,tuple(sorted(main)),tuple(sorted(bass)),tones,sweeps.get(event.start,0),
+                      event.start in optional_sweeps,sweep_targets.get(event.start,()))
         at=clock.seconds_at(event.start);best={}
         for node in nodes:
             for recorded,live,loss,role_cost in options:
-                a=advance(node.lanes[0],recorded,at,tone);b=advance(node.lanes[1],live,at,tone)
+                a=advance(node.lanes[0],recorded,at,tones[0]);b=advance(node.lanes[1],live,at,tones[1])
                 if a is None or b is None:continue
                 movement=a[1]+b[1]
                 cost=(node.cost[0]+loss,node.cost[1]+(role_cost if strategy=='roles' else movement),
@@ -251,22 +377,33 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
                 if states not in best or cost<best[states].cost:best[states]=candidate
         if not best:
             names='、'.join(pitch_name(p) for p in sorted(main or set(wanted)))
-            location=event_position(original.score,original.score.events[next(i for i,e in enumerate(original.score.events) if e.start==event.start)])
+            location=event_position(original.score,original_at[event.start])
             hint=pitch_range_hint(main) if main else ''
             raise ValueError(f'{location}（{at:.3f} 秒）：当前双路搜索未找到按原起拍保留 {names} 的可行方案。'+
                              (hint or '可能是短时间内换品／翻页过密或同拍需更多独立选区。')+
                              '可核对主旋律轨道、整体降低 BPM 或重新编配；不会单独降八度或静默删除主旋律。')
-        nodes=sorted(best.values(),key=lambda node:node.cost)[:beam]
-        descriptions.append((event,main,bass,event_rows))
+        ranked=sorted(best.values(),key=lambda node:node.cost)
+        upcoming=following_melody[index]
+        if upcoming and upcoming[0]-at<preparation_window:
+            next_at,next_tones,next_pitches=upcoming
+            next_options=pairs(next_pitches,next_pitches,(),next_tones,0)
+            ready=[]
+            for node in ranked:
+                if any(advance(node.lanes[0],a,next_at,next_tones[0]) is not None and
+                       advance(node.lanes[1],b,next_at,next_tones[1]) is not None for a,b,_,_ in next_options):
+                    ready.append(node)
+                    if len(ready)==beam:break
+            if ready:ranked=ready
+        nodes=ranked[:beam]
     node=min(nodes,key=lambda node:node.cost);route=[]
     while node.parent is not None:route.append(node.pair);node=node.parent
     route.reverse()
     lead=F(clock.time_signature[0]*4,clock.time_signature[1])*preroll_bars
     template=_shift_clock(clock,lead,preroll_bars);lanes=[[],[]];pitched=[[],[]];markers=[{},{}];details=[]
-    end_hints={};approximated_sweeps=0
+    end_hints={};approximated_sweeps=0;revoiced_sweeps=[]
     for hint in source.note_hints:
         key=hint.start,hint.pitch;end_hints[key]=max(end_hints.get(key,F(0)),hint.end)
-    for (event,main,bass,event_rows),pair in zip(descriptions,route):
+    for (event,main,bass,event_rows,_),pair in zip(descriptions,route):
         output={}
         sweep_approx=event.start in sweeps and not any(choice is not None and choice.sweep for choice in pair)
         approximated_sweeps+=int(sweep_approx)
@@ -286,6 +423,11 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
                 pitched[lane].append(GuitarEvent(tuple(pitches),start,beats,'Zero',label,1))
                 for p in pitches:output[p]=(label,choice.selector,end)
             if choice.sweep:markers[lane][start,label]=choice.sweep
+            if choice.sweep:
+                target=set(sweep_targets.get(event.start,event.notes));played=set(choice.pitches)
+                if played!=target:
+                    revoiced_sweeps.append({'beat':str(event.start),'selector':choice.selector,
+                        'added':sorted(played-target),'omitted':sorted(target-played)})
         for row in event_rows:
             pitch=row['pitch'];kept=output.get(pitch);original_end=end_hints.get((event.start,pitch),event.start+event.beats)
             details.append({**row,'part':kept[0] if kept else 'omitted','selector':kept[1] if kept else '',
@@ -304,7 +446,20 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
         end=max(template.beats,cursor)
         if cursor<end:
             rest=GuitarEvent((),cursor,end-cursor,game[-1].chord,'休止',1);game.append(rest);sound.append(replace(rest,chord='Zero'))
-        score=replace(template,events=split_long_rests(game),beats=end)
+        lane_clock=template
+        if source.lane_timbres:
+            points=lane_timbres[index];tones=dict(points)
+            _,starts=template._position_index
+            changes=[];previous=points[0][1]
+            changes_at={change.bar:change for change in template.bar_changes}
+            for bar,at in enumerate(starts):
+                change=changes_at.get(bar,MeasureChange(bar))
+                tone=tones.get(at-lead,previous)
+                if tone!=previous:changes.append(replace(change,timbre=tone))
+                elif change.bpm is not None or change.meter is not None:changes.append(replace(change,timbre=None))
+                previous=tone
+            lane_clock=replace(template,default_timbre=points[0][1],bar_changes=tuple(changes))
+        score=replace(lane_clock,events=split_long_rests(game),beats=end)
         plan=make_plan(score,part_profile(profile,score),tap=tap,timing=timing,sustain_notes=sustain_notes)
         first=min(step.at for step in plan if step.kind in ('page','chord_move','mode_down','timbre_down') or step.kind=='note' and step.data[1])
         if first<.25:raise ValueError('共同前奏不足以在开录／导入后准备首音，请增加共同前奏小节数；两份谱需要同步增加，不能只推迟一个声部')
@@ -327,7 +482,7 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
                 for p in sounded.notes:actual_ends[label,event.start,p]=sweep_release-score.seconds_at(lead)
             else:
                 for n,p in zip(event.notes,sounded.notes):actual_ends[label,event.start,p]=releases.get((event_index,n),score.seconds_at(event.start+event.beats))-score.seconds_at(lead)
-        scores[label]=score;audio[label]=replace(template,events=split_long_rests(sound),beats=end);sweep_map[label]=markers[index]
+        scores[label]=score;audio[label]=replace(lane_clock,events=split_long_rests(sound),beats=end);sweep_map[label]=markers[index]
     shared_end=max((s.beats for s in scores.values() if s is not None),default=template.beats)
     if shared_end>100000:raise ValueError('加入共同前奏后超过 100000 拍，请先分段拆分')
     scores={k:replace(s,beats=shared_end) if s is not None else None for k,s in scores.items()}
@@ -339,20 +494,21 @@ def split_source(source,rows=None,profile=None,timing=None,tap=.04,*,strategy='r
             actual=actual_ends[key];expected=clock.seconds_at(F(row['source_end']));row['actual_release_seconds']=actual
             if abs(actual-expected)>.001:
                 row['hold_change_ms']=(actual-expected)*1000
-                row['reason']+=f'；尾音约{"缩短" if actual<expected else "延长"} {abs(actual-expected)*1000:.0f} ms'
+                row['reason']+=f'；按键约提前松开 {abs(actual-expected)*1000:.0f} ms' if actual<expected else f'；按键约多保持 {(actual-expected)*1000:.0f} ms'
     kept=sum(row['part']!='omitted' for row in details);omitted=len(details)-kept
     moved=sum(row['main'] and row['part']=='recorded' for row in details)
     report={'version':1,'strategy':strategy,'source':original.name,'timing':timing.label,'transpose':transpose,
             'preroll_bars':preroll_bars,'preroll_beats':str(lead),'notes':details,'input_notes':len(details),'kept_notes':kept,
             'omitted_notes':omitted,'melody_to_recorded':moved,'grouped_duration_notes':duration_grouped,'shortened_holds':clipped,'extended_holds':extended,
-            'approximated_sweeps':approximated_sweeps,
+            'approximated_sweeps':approximated_sweeps,'revoiced_sweeps':revoiced_sweeps,
             'reference_voicings':any(c is not None and c.mode=='chord' and not c.measured for pair in route for c in pair),
             'summary':f'{STRATEGIES[strategy]}：原谱 {len(details)} 音，保留 {kept} 音，省略伴奏／装饰音 {omitted} 音；共同前奏 {preroll_bars} 小节；生成 {sum(s is not None for s in scores.values())} 份谱，逐份通过“{timing.label}”输入检查。',
-            'limitations':'使用有限宽度搜索，不保证全局最优；声部为规则推断，可指定 MIDI 主旋律轨道。同选区的数字键独立保存时值；整扫只有一个保持按钮，仍按组处理。两路仍可能不足，按键重触发可能缩短尾音。'}
+            'limitations':'使用有限宽度搜索；声部为规则推断，可指定 MIDI 主旋律轨道。数字键可分别安排松键，整扫按组松开。报告中的保持时长来自输入计划，游戏的实际音长由音色和衰减决定。'}
     if moved:report['summary']+=f' 为保留起拍，{moved} 个旋律音移入录音声部。'
     if approximated_sweeps:report['summary']+=f' {approximated_sweeps} 处扫弦受按法或时序限制，改为双路齐奏近似，未复现扫弦滚动。'
-    if duration_grouped or clipped:report['summary']+=f' 同拍音长合组 {duration_grouped} 音，重触发／选区缩短尾音 {clipped} 处，请试听核对。'
-    if extended:report['summary']+=f' 最短触发时间延长尾音 {extended} 处。'
+    if revoiced_sweeps:report['summary']+=f' {len(revoiced_sweeps)} 处扫弦保留方向并替换内声部。'
+    if duration_grouped or clipped:report['summary']+=f' 同拍时值合组 {duration_grouped} 音，输入需提前松开 {clipped} 处。'
+    if extended:report['summary']+=f' 最短触发时间增加按住时长 {extended} 处。'
     clock_error=0.0
     for score in scores.values():
         if score is None:continue

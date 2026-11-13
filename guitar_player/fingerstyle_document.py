@@ -68,7 +68,10 @@ class FingerCell:
 
 
 class FingerstyleDocument(TabDocument):
-    def __init__(self,cells=(),bpm=100,meter=(4,4),bars=4,tempo_map=(),bar_changes=(),default_timbre='clean',capo=0,chord_changes=(),measure_repeats=(),repeat_sections=()):
+    def __init__(self,cells=(),bpm=100,meter=(4,4),bars=4,tempo_map=(),bar_changes=(),default_timbre='clean',capo=0,chord_changes=(),measure_repeats=(),repeat_sections=(),tuning=None):
+        self.tuning = tuple(STANDARD_TUNING.values()) if tuning is None else tuple(tuning)
+        if len(self.tuning) != 6 or any(type(pitch) is not int or not 0 <= pitch <= 127 for pitch in self.tuning):
+            raise ValueError('六弦定弦无效')
         self.measure_repeats=set(measure_repeats);self.repeat_sections=list(repeat_sections)
         self.chord_changes={}
         for at,name in chord_changes:
@@ -110,12 +113,13 @@ class FingerstyleDocument(TabDocument):
             cells.append(FingerCell(event.start,event.beats,tuple(values)))
         return cls(cells,bpm,bars=max(4,len(score_layout(score))),capo=capo)
 
-    def snapshot(self):return super().snapshot(),tuple(sorted(self.chord_changes.items())),tuple(sorted(self.measure_repeats)),tuple(sorted(self.repeat_sections))
+    def snapshot(self):return super().snapshot(),tuple(sorted(self.chord_changes.items())),tuple(sorted(self.measure_repeats)),tuple(sorted(self.repeat_sections)),self.tuning
 
     def restore(self,state):
         base,marks,*repeats=state;super().restore(base);self.chord_changes=dict(marks)
         self.measure_repeats=set(repeats[0]) if repeats else set()
         self.repeat_sections=list(repeats[1]) if repeats else []
+        self.tuning=repeats[2] if len(repeats)>2 else tuple(STANDARD_TUNING.values())
 
     def move_annotations(self,move):self.chord_changes={F(move(at)):name for at,name in sorted(self.chord_changes.items())}
     def annotation_times(self):return tuple(self.chord_changes)
@@ -244,7 +248,7 @@ class FingerstyleDocument(TabDocument):
         from .voicings import available_voicings
         rows=rows or {};score=self.score();points=timbre_points(score);starts=[p[0] for p in points]
         tables={tone:available_voicings(rows,tone,reference) for tone in ('clean','distorted')}
-        events=[];reference_hits=0;cells=defaultdict(deque);sweeps=[];hints=[]
+        events=[];reference_hits=0;cells=defaultdict(deque);sweeps=[];optional_sweeps=[];hints=[]
         for cell in self.cells:cells[cell.start].append(cell)
         from .voice_roles import NoteHint
         for event in score.events:
@@ -253,7 +257,7 @@ class FingerstyleDocument(TabDocument):
             tone=points[max(0,bisect_right(starts,event.start)-1)][1];pitches=[];label=event.chord
             for string in cell.members:
                 value=cell.values[string-1]
-                if type(value) is int:pitch=STANDARD_TUNING[string]+value
+                if type(value) is int:pitch=self.tuning[string-1]+value
                 else:
                     item=tables[tone].get(label)
                     if not item:raise ValueError(f'第 {self.bar_index(cell.start)+1} 小节 {string} 弦的 X／点需要可用的和弦音高表，请先标记和弦')
@@ -269,19 +273,27 @@ class FingerstyleDocument(TabDocument):
             if cell.sweep:
                 if not pitches:raise ValueError('扫弦没有可发声的弦，请核对和弦音高表')
                 sweeps.append((cell.start,cell.sweep))
-        return PitchSource(replace(score,events=tuple(events),capo=0),name,tuple(sorted(self.chord_changes.items())),reference_hits,copy.deepcopy(self),tuple(sweeps),self.capo,tuple(hints))
+                if all(type(cell.values[s-1]) is int for s in cell.members):optional_sweeps.append(cell.start)
+        return PitchSource(replace(score,events=tuple(events),capo=0),name,tuple(sorted(self.chord_changes.items())),reference_hits,copy.deepcopy(self),tuple(sweeps),self.capo,tuple(hints),optional_sweeps=tuple(optional_sweeps))
 
     def to_dict(self):
-        return {'version':5 if self.measure_repeats or self.repeat_sections else 4,'kind':'fingerstyle_source','bpm':self.bpm,'meter':list(self.meter),'bars':self.bars,
+        data = {'version':5 if self.measure_repeats or self.repeat_sections else 4,'kind':'fingerstyle_source','bpm':self.bpm,'meter':list(self.meter),'bars':self.bars,
                 'tempo_map':[[str(at),tempo] for at,tempo in self.tempo_map],'source_bpm':self.source_bpm,
                 'bar_changes':[c.to_dict() for c in sorted(self.bar_changes.values(),key=lambda c:c.bar)],
                 'default_timbre':self.default_timbre,'capo':self.capo,'chord_marks':[[str(at),name] for at,name in sorted(self.chord_changes.items())],
                 'cells':[{'start':str(c.start),'beats':str(c.beats),'values':list(c.values),'sweep':c.sweep} for c in self.cells],
                 'measure_repeats':sorted(self.measure_repeats),'repeat_sections':[list(row) for row in sorted(self.repeat_sections)]}
+        if self.tuning != tuple(STANDARD_TUNING.values()):
+            data['tuning'] = list(self.tuning)
+            data['version'] = 6
+        return data
 
     @classmethod
     def from_dict(cls,data):
-        if not isinstance(data,dict) or data.get('version') not in (4,5) or data.get('kind')!='fingerstyle_source':raise ValueError('不是可编辑的指弹原谱文件')
+        if isinstance(data, dict) and 'base_part' in data and data.get('kind') == 'fingerstyle_source':
+            from .duet_composition import DuetTrackDocument
+            return DuetTrackDocument.from_dict(data)
+        if not isinstance(data,dict) or data.get('version') not in (4,5,6) or data.get('kind')!='fingerstyle_source':raise ValueError('不是可编辑的指弹原谱文件')
         bpm=data.get('bpm',100);source_bpm=data.get('source_bpm',bpm);meter=data.get('meter',[4,4]);bars=data.get('bars',4)
         if any(type(v) not in (int,float) or not math.isfinite(v) or not 20<=v<=360 for v in (bpm,source_bpm)):raise ValueError('原谱 BPM 应为 20～360')
         if not valid_meter(meter) or type(bars) is not int or not 1<=bars<=25000:raise ValueError('原谱拍号或小节数无效')
@@ -297,7 +309,10 @@ class FingerstyleDocument(TabDocument):
         repeated=data.get('measure_repeats',[]);sections=data.get('repeat_sections',[])
         if not isinstance(repeated,list) or len(repeated)>25000 or any(type(i) is not int for i in repeated):raise ValueError('重复小节记号无效')
         if not isinstance(sections,list) or len(sections)>25000 or any(not isinstance(row,list) or len(row)!=3 or any(type(i) is not int for i in row) for row in sections):raise ValueError('反复段记号无效')
-        result=cls(cells,bpm,meter,bars,tempos,parse_changes(data.get('bar_changes',[])),tone,capo,marks,repeated,[tuple(row) for row in sections])
+        tuning = data.get('tuning')
+        if tuning is not None and not isinstance(tuning, (tuple, list)):
+            raise ValueError('六弦定弦无效')
+        result=cls(cells,bpm,meter,bars,tempos,parse_changes(data.get('bar_changes',[])),tone,capo,marks,repeated,[tuple(row) for row in sections],tuning)
         result.source_bpm=source_bpm;return result
 
     def save(self,path):

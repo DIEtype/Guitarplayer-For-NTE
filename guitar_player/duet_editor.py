@@ -4,7 +4,6 @@ from dataclasses import replace
 from fractions import Fraction as F
 import math
 from pathlib import Path
-from types import SimpleNamespace
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk,filedialog
@@ -33,10 +32,10 @@ class DuetEditor(VisualFingerstyleEditor):
         # edit the same document instances used by saving and undo snapshots.
         self.doc=self.documents[self.role]
         self.title('双轨吉他编曲 · 录音伴奏与主旋律 · by Akari')
-        self.geometry(f'{min(1280,self.winfo_screenwidth()-60)}x{min(960,self.winfo_screenheight()-80)}')
+        self.geometry(f'{min(1460,self.winfo_screenwidth()-60)}x{min(960,self.winfo_screenheight()-80)}')
         self.minsize(min(1020,self.winfo_screenwidth()-60),min(720,self.winfo_screenheight()-90))
         self.base_state=self.track_state();self.file_path=None
-        self.feedback.set('两轨共用小节与节拍；点击蓝色或青色轨的弦线即可编辑。音符只改当前轨，插入小节与 BPM／拍号变更同步两轨。')
+        self.feedback.set('点击弦线切换轨道。想在游戏里只弹这一轨，点“5 秒后演奏当前轨”。两轨各有音色时，可在“自动编配双轨…”选择“保留原轨与音色”。')
 
     def _build(self):
         super()._build()
@@ -45,7 +44,7 @@ class DuetEditor(VisualFingerstyleEditor):
         ttk.Label(heading,textvariable=self.track_caption,foreground=COLORS[self.role]).pack(side='left',padx=12)
         self.apply_button.configure(text='应用两轨并返回合奏')
         self.translate_action_button.configure(text='自动编配双轨…',command=self.send_to_translator)
-        tracks=ttk.Frame(self,padding=(16,4));tracks.pack(fill='x',before=self.canvas.master)
+        tracks=ttk.Frame(self.workspace_shell,padding=(12,3));tracks.pack(fill='x',before=self.workspace_body)
         self.track_buttons={}
         for role in ROLES:
             button=ttk.Button(tracks,text=TRACK_NAMES[role],command=lambda r=role:self.switch_track(r),
@@ -53,17 +52,14 @@ class DuetEditor(VisualFingerstyleEditor):
             button.pack(side='left',padx=(0,8));self.track_buttons[role]=button
         self.preview_choice=tk.StringVar(value='两轨合成')
         ttk.Combobox(tracks,textvariable=self.preview_choice,values=('两轨合成','仅当前轨'),state='readonly',width=10).pack(side='left',padx=8)
-        ttk.Label(tracks,text='共用 BPM／拍号 · 音色与 Capo 分轨设置',foreground='#62798d').pack(side='left',padx=8)
+        self.solo_button=ttk.Button(tracks,text='5 秒后演奏当前轨',command=self.play_current_track,style='Workspace.Compose.TButton')
+        self.solo_button.pack(side='left',padx=4)
         self.lead_button=ttk.Button(tracks,text='两轨前加空小节',command=self.add_lead_bar)
         self.lead_button.pack(side='right')
         for child in heading.winfo_children():
             if isinstance(child,ttk.Button):
                 if child.cget('text')=='新建':child.configure(text='清空当前轨')
                 elif child.cget('text')=='打开原谱…':child.configure(text='打开／替换轨道…')
-
-    def refresh(self):
-        super().refresh()
-        self.feedback.set(TRACK_NAMES[self.role]+' · '+self.feedback.get().split('|')[0].strip()+' | 音符只改当前轨；BPM／拍号与插入小节同步两轨。')
 
     def initial_focus(self):
         if self.winfo_viewable() and not self.attributes('-disabled'):self.canvas.focus_set()
@@ -99,26 +95,26 @@ class DuetEditor(VisualFingerstyleEditor):
         self.stop_preview();self.role=role;self.doc=self.documents[role];self.doc.focus_string=self.string
         self.typed='';self.typed_location=None;self.bar_selection=None;self.load_variables();self.refresh();self.reveal_cursor();return True
 
-    def select_cursor(self,at,string=None):
-        if string is not None:self.doc.focus_string=string
-        return super().select_cursor(at,string)
-
     def draw(self,width=None):
         if not hasattr(self,'canvas') or self.closed:return
         from .score_view import score_view
         c=self.canvas;views={r:score_view(self,d,r) for r,d in self.documents.items()}
-        width=max(850,width or c.winfo_width());columns=2 if width>=1050 else 1
-        key=(tuple((r,v.state) for r,v in views.items()),width,self.role,self.bar_selection)
+        width=max(420,width or c.winfo_width());columns=max(1,min(3,width//450))
+        key=(tuple(views.values()),width,self.role,self.bar_selection)
         if getattr(self,'_render_key',None)==key:
             self.bar_boxes=self.surfaces[self.role]
             self.draw_cursor();return
-        self._render_key=key;c.delete('all');self.visible_tracks=set();self.draw_views=views
-        bar_width=(width-40-(columns-1)*24)/columns;bars=max(d.bars for d in self.documents.values());self.draw_columns=columns
-        self.surfaces={role:[(20+(i%columns)*(bar_width+24),25+(i//columns)*PAIR_HEIGHT+j*TRACK_HEIGHT,bar_width)
-                             for i in range(bars)] for j,role in enumerate(ROLES)}
+        self._render_key=key;self.draw_views=views
+        bars=max(d.bars for d in self.documents.values())
+        geometry=(width,bars)
+        if getattr(self,'_bar_geometry',None)!=geometry:
+            self._bar_geometry=geometry;c.delete('all');self.visible_tracks=set();self._bar_render_keys={}
+            bar_width=(width-40-(columns-1)*24)/columns;self.draw_columns=columns
+            self.surfaces={role:[(20+(i%columns)*(bar_width+24),25+(i//columns)*PAIR_HEIGHT+j*TRACK_HEIGHT,bar_width)
+                                 for i in range(bars)] for j,role in enumerate(ROLES)}
+            c.configure(scrollregion=(0,0,width,40+math.ceil(bars/columns)*PAIR_HEIGHT))
         self.bar_boxes=self.surfaces[self.role];self.draw_scores={r:v.score for r,v in views.items()}
         self.draw_score=self.draw_scores[self.role];self.draw_tempos=views[self.role].tempos;self.draw_cells=views[self.role]
-        c.configure(scrollregion=(0,0,width,40+math.ceil(bars/columns)*PAIR_HEIGHT))
         self.draw_visible();self.draw_playhead()
         if hasattr(self,'track_caption'):self.track_caption.set('正在编辑：'+TRACK_NAMES[self.role])
         from .composer_workspace import update_context
@@ -129,22 +125,27 @@ class DuetEditor(VisualFingerstyleEditor):
         if self.closed or not self.surfaces:return
         top=self.canvas.canvasy(0);height=max(300,self.canvas.winfo_height())
         first=max(0,int((top-25)//PAIR_HEIGHT)-1)*self.draw_columns
-        last=min(len(self.surfaces[self.role]),(int((top+height-25)//PAIR_HEIGHT)+3)*self.draw_columns)
+        last=min(len(self.surfaces[self.role]),(int((top+height-25)//PAIR_HEIGHT)+2)*self.draw_columns)
         wanted={(role,index) for role in ROLES for index in range(first,last)}
-        for role,index in self.visible_tracks-wanted:self.canvas.delete(f'track_{role}_{index}')
+        keys={ (role,index):self.draw_views[role].bar_key(self.documents[role],index,self.bar_selection)
+               for role,index in wanted if index<self.documents[role].bars }
+        wanted=set(keys)
+        dirty={key for key in wanted if self._bar_render_keys.get(key)!=keys[key]}
+        for role,index in (self.visible_tracks-wanted)|(self.visible_tracks&dirty):self.canvas.delete(f'track_{role}_{index}')
         active=self.doc;at=self.at
         try:
-            for role,index in sorted(wanted-self.visible_tracks):
+            for role,index in sorted((wanted-self.visible_tracks)|dirty):
                 self.doc=self.documents[role];self.draw_score=self.draw_scores[role]
                 self.draw_tempos=self.draw_views[role].tempos;self.draw_cells=self.draw_views[role]
-                left,y,width=self.surfaces[role][index];before=set(self.canvas.find_all());self.suppress_cursor=role!=self.role
-                self.canvas.create_rectangle(left,y-15,left+width,y+TRACK_HEIGHT-14,fill='white',outline='#d8e1e8')
-                self.canvas.create_rectangle(left,y-15,left+4,y+TRACK_HEIGHT-14,fill=COLORS[role],outline='')
-                self.canvas.create_text(left+12,y-6,text=TRACK_NAMES[role]+(' · 编辑中' if role==self.role else ''),anchor='w',fill=COLORS[role],font=('Microsoft YaHei UI',9,'bold'))
-                staff_before=set(self.canvas.find_all())
+                left,y,width=self.surfaces[role][index];tag=f'track_{role}_{index}'
+                self.canvas.create_rectangle(left,y-15,left+width,y+TRACK_HEIGHT-14,fill='white',outline='#d8e1e8',tags=tag)
+                self.canvas.create_rectangle(left,y-15,left+4,y+TRACK_HEIGHT-14,fill=COLORS[role],outline='',tags=tag)
+                self.canvas.create_text(left+12,y-6,text=TRACK_NAMES[role],anchor='w',fill=COLORS[role],font=('Microsoft YaHei UI',9,'bold'),tags=tag)
+                staff_before=len(self.canvas.find_all())
                 VisualFingerstyleEditor.draw_bar(self,index,left/SCALE,(y+8)/SCALE,width/SCALE)
-                for item in set(self.canvas.find_all())-staff_before:
+                for item in self.canvas.find_all()[staff_before:]:
                     self.canvas.scale(item,0,0,SCALE,SCALE)
+                    self.canvas.addtag_withtag(tag,item)
                     if self.canvas.type(item)=='text':
                         raw=self.canvas.itemcget(item,'font');cache=getattr(self,'_scaled_fonts',None)
                         if cache is None:cache=self._scaled_fonts={}
@@ -152,11 +153,10 @@ class DuetEditor(VisualFingerstyleEditor):
                             options=tkfont.Font(root=self,font=raw).actual()
                             cache[raw]=(options['family'],max(7,round(options['size']*SCALE)),options['weight'],options['slant'])
                         self.canvas.itemconfigure(item,font=cache[raw])
-                for item in set(self.canvas.find_all())-before:self.canvas.addtag_withtag(f'track_{role}_{index}',item)
         finally:
             self.doc=active;self.at=at;self.suppress_cursor=False
             self.draw_score=self.draw_scores[self.role];self.draw_tempos=self.draw_views[self.role].tempos;self.draw_cells=self.draw_views[self.role]
-        self.visible_tracks=wanted;self.canvas.tag_raise('playhead');self.draw_cursor()
+        self._bar_render_keys=keys;self.visible_tracks=wanted;self.canvas.tag_raise('playhead');self.draw_cursor()
 
     def draw_cursor(self):
         if self.closed or not self.surfaces:return
@@ -167,13 +167,12 @@ class DuetEditor(VisualFingerstyleEditor):
 
     def click(self,event):
         absolute=self.canvas.canvasy(event.y)
-        for role,boxes in self.surfaces.items():
-            for index,(left,y,width) in enumerate(boxes):
-                if left<=event.x<=left+width and y-15<=absolute<y+TRACK_HEIGHT-14:
-                    if not self.switch_track(role):return
-                    self.bar_boxes=[(x/SCALE,(top+8)/SCALE,w/SCALE) for x,top,w in self.surfaces[role]]
-                    fake=SimpleNamespace(x=event.x/SCALE,y=absolute/SCALE-self.canvas.canvasy(0),state=getattr(event,'state',0))
-                    VisualFingerstyleEditor.click(self,fake);return
+        for role,index in sorted(self.visible_tracks):
+            left,y,width=self.surfaces[role][index]
+            if left<=event.x<=left+width and y-15<=absolute<y+TRACK_HEIGHT-14:
+                if not self.switch_track(role):return
+                self.click_bar(index,(left/SCALE,(y+8)/SCALE,width/SCALE),event.x/SCALE,absolute/SCALE,getattr(event,'state',0))
+                return
 
     def reveal_cursor(self):
         if not self.surfaces:return
@@ -240,6 +239,49 @@ class DuetEditor(VisualFingerstyleEditor):
         from .voicings import read_voicings
         return read_voicings(self.parent.settings_dir/'voicings.json') if self.parent.settings_dir else {}
 
+    def play_current_track(self):
+        from .direct_score import compile_document
+        from .guitar import make_plan
+
+        app=self.parent
+        if app.busy:
+            self.feedback.set('请先停止当前演奏，再演奏当前轨。');return
+        if not self.settings_changed():return
+        if not any(cell.notes for cell in self.doc.cells):
+            self.feedback.set('当前轨没有音符。请点击另一条轨道的弦线，或先写入音符。');return
+        self.stop_preview()
+        name=TRACK_NAMES[self.role]
+        part=self.project.parts[self.role]
+        try:
+            rows=self.voice_rows()
+        except (OSError,ValueError) as error:
+            self.feedback.set('读取和弦音高表失败：'+str(error));return
+        if not self.doc.matches_part(part):
+            try:part=DuetPart(name,compile_document(self.doc,rows))
+            except ValueError as error:
+                self.offer_solo_translation(rows,name,error);return
+        try:
+            profile=app.part_playback_profile(part,solo=True)
+            tap=int(app.tap.get())/1000
+        except ValueError as error:
+            self.feedback.set(str(error));return
+        try:
+            make_plan(part.score,profile,tap=tap,timing=app.input_timing,sustain_notes=app.sustain_notes.get())
+        except ValueError as error:
+            self.offer_solo_translation(rows,name,error);return
+        app.start_solo(part,self.feedback)
+
+    def offer_solo_translation(self,rows,name,error):
+        try:source=self.doc.pitch_source(rows,True,name)
+        except ValueError as source_error:
+            self.feedback.set('当前轨无法转译：'+str(source_error));return
+        window=self.parent.open_translator()
+        if window is None:return
+        window.set_source(source)
+        window.feedback.set(f'{name}需要近似转译。点“生成转译预览”，再点“5 秒后演奏此轨”。\n{error}')
+        from .navigation import navigate
+        navigate(self,window)
+
     def keep_draft(self):
         for role,doc in self.documents.items():self.project.documents[role]=copy.deepcopy(doc)
         if not self.staged:self.workspace.persist_project()
@@ -290,8 +332,10 @@ class DuetEditor(VisualFingerstyleEditor):
         except (ValueError,OSError) as error:self.feedback.set('双轨原谱未保存：'+str(error))
 
     def open_file(self,path=None):
-        path=path or filedialog.askopenfilename(parent=self,title='打开双轨原谱，或替换当前轨',filetypes=[('曲谱','*.gscore *.tab *.txt')])
+        from .guitar_pro import EXTENSIONS, FILE_FILTER
+        path=path or filedialog.askopenfilename(parent=self,title='打开曲谱',filetypes=[('曲谱',f'*.gscore *.tab *.txt {FILE_FILTER[1]}'),FILE_FILTER])
         if not path:return
+        if Path(path).suffix.lower() in EXTENSIONS:return self.parent.import_guitar_pro(path,editor=self)
         try:
             import json
             data=json.loads(Path(path).read_text(encoding='utf-8-sig')) if Path(path).suffix.lower()=='.gscore' else None
@@ -300,12 +344,20 @@ class DuetEditor(VisualFingerstyleEditor):
                 if not self.edit(lambda:self.documents.update(docs)):return
                 self.project=project;self.staged=True
             else:
-                doc=DuetTrackDocument.from_document(read_document(path))
-                def change():self.documents[self.role]=doc;self.doc=doc
-                if not self.edit(change):return
-            self.doc=self.documents[self.role];self.file_path=Path(path) if isinstance(data,dict) and data.get('kind')=='duet_composition' else None
+                return self.replace_current_track(read_document(path))
+            self.doc=self.documents[self.role];self.file_path=Path(path)
             self.load_variables();self.select_cursor(0,1)
         except (OSError,ValueError,TypeError,KeyError) as error:self.feedback.set('原谱未打开：'+str(error))
+
+    def replace_current_track(self,document,*,keep_clock=False):
+        doc=DuetTrackDocument.from_document(document)
+        def change():
+            self.documents[self.role]=doc;self.doc=doc
+            if keep_clock:sync_clock(self.documents,'live' if self.role=='recorded' else 'recorded')
+        if not self.edit(change):return False
+        self.file_path=None
+        self.load_variables();self.select_cursor(0,1)
+        return True
 
     def send_to_translator(self):
         if not self.settings_changed():return
@@ -314,8 +366,7 @@ class DuetEditor(VisualFingerstyleEditor):
         try:
             dialog=self.workspace.open_splitter()
             if dialog is None:raise ValueError(self.workspace.feedback.get())
-            dialog.source=source;dialog.manual_keys=set(lead);dialog.show_source('source',source)
-            dialog.feedback.set('双轨原谱已送入；现场轨的全部音符已标为受保护旋律。点“开始自动拆分”生成可执行两轨。')
+            dialog.use_duet_source(source,lead)
             from .navigation import suppress_return,present
             suppress_return(self);self.destroy();present(dialog)
         except (ValueError,OSError) as error:self.feedback.set('未进入自动编配：'+str(error))

@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+!vendor/_quickjs.pyd
 *.tmp
 startup_error.log
 .preview/
